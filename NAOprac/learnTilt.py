@@ -9,11 +9,19 @@ import random as rnd
 import copy
 import images2
 import cv2
+import ConfigParser
+import math
 
 #Accelerometer imports
 import socket
 import traceback
 
+config = ConfigParser.ConfigParser()
+config.read('config.ini')
+learnt_q_matrix = np.load("q.npy")
+min_angle = float(config.get("nao_params", "right_angle_max"))
+max_angle = float(config.get("nao_params", "left_angle_max"))
+num_angles = float(config.get("nao_params", "num_angles"))
 
 use_nao = True
 use_accelerometer = False
@@ -21,7 +29,7 @@ use_accelerometer = False
 #def setup_nao():
 if use_nao:
     NAO_PORT = 9559
-    NAO_IP = "172.22.0.2"
+    NAO_IP = "172.22.0.3"
     motionProxy = ALProxy("ALMotion", NAO_IP, NAO_PORT)
     autonomousLifeProxy = ALProxy("ALAutonomousLife", NAO_IP, NAO_PORT)
     postureProxy = ALProxy("ALRobotPosture", NAO_IP, NAO_PORT)
@@ -84,7 +92,7 @@ def interpolate2(angs1, angs2, mid_angs, interpolation_value, num_interpolations
     new_angs = [0 for i in angs1]
     proportion1 = float(interpolation_value) / float(num_interpolations)
     proportion2 = 1 - proportion1
-    print(proportion1, proportion2)
+    #print(proportion1, proportion2)
     for i in range(0, len(angs1)):
         new_angs[i] = proportion1 * angs2[i] + proportion2 * angs1[i]
     return new_angs
@@ -111,7 +119,7 @@ tilted2 = [0.9257596135139465, 0.006530190818011761, 1.070677638053894, 0.167241
 tilted3 = [1.0816580057144165, 0.023215852677822113, 1.1921952962875366, 0.17280954122543335, -1.4838372468948364, -1.179466962814331, -0.15497589111328125, 1.6077502965927124, 1.3238054513931274, -0.257753849029541]
 tilted4 = [1.122732400894165, -0.07589391618967056, 1.138623833656311, 0.12426231801509857, -1.472051739692688, -0.8558668494224548, -0.5384759902954102, 1.5980267524719238, 1.33295476436615, -0.4817180633544922]
 
-tiltLeft = [0.18250393867492676, -0.08748006820678711, 0.6727747321128845, 0.14530789852142334, -1.4174580574035645, -0.5, 0.15029001235961914, 1.735066294670105, 0.9, -0.07674193382263184]#3313021659851074, 7286896109580994#[0.846985399723053, -0.09535059332847595, 0.14883995056152344, 0.07359004020690918, -1.5987539291381836, -0.8236891627311707, -0.25315189361572266, 1.498676061630249, 0.08287787437438965, -0.3237159252166748]
+tiltLeft = [0.18250393867492676, -0.08748006820678711, 0.6727747321128845, 0.14530789852142334, -1.9174580574035645, -0.5, 0.15029001235961914, 1.735066294670105, 0.9, -0.07674193382263184]#3313021659851074, 7286896109580994#[0.846985399723053, -0.09535059332847595, 0.14883995056152344, 0.07359004020690918, -1.5987539291381836, -0.8236891627311707, -0.25315189361572266, 1.498676061630249, 0.08287787437438965, -0.3237159252166748]
 tiltRight = flip_angles(tiltLeft, joints)#[0.4985031187534332, -0.036845769733190536, 0.617575466632843, 0.14542429149150848, -1.5432469844818115, -0.8221817016601562, 0.22545599937438965, 1.5816208124160767, 0.49399709701538086, 0.19631004333496094]
 tiltForward = [0.8811683654785156, -0.03177360072731972, 0.6131321787834167, 0.11051787436008453, -1.5448977947235107, -0.44484609365463257, -0.1764519214630127, 1.5355136394500732, 0.12280456721782684, -0.09668397903442383]
 tiltBackward = [0.7209112048149109, 0.049126025289297104, 0.4720867872238159, 0.1430918127298355, -1.5447890758514404, -1.0200631618499756, 0.08125996589660645, 1.5432122945785522, 0.3758842647075653, 0.0858621597290039]
@@ -183,6 +191,12 @@ def set_up_first_time():
     motionProxy.setStiffnesses("Body", 0.1)
     awareness.stopAwareness()
 
+    targetName = "RedBall"
+    diameterOfBall = 0.04
+    tracker.registerTarget(targetName, diameterOfBall)
+    tracker.track(targetName)  
+    tracker.setTimeOut(100)   
+
 
 def set_up():
     postureProxy.goToPosture("StandInit", 0.5)
@@ -190,10 +204,7 @@ def set_up():
     motionProxy.setAngles(joints, starting_angles, speed)
     motionProxy.setAngles(shoulder_roll_joints, shoulder_roll_angles, speed)
 
-    targetName = "RedBall"
-    diameterOfBall = 0.04
-    tracker.registerTarget(targetName, diameterOfBall)
-    tracker.track(targetName)    
+    
 
 
 def set_all_stiff():
@@ -288,6 +299,14 @@ def head_forward(mp):
     awareness.stopAwareness()
     print mp.getAngles(["HeadPitch", "HeadYaw"], False)
 
+def rotate_head_left():
+    ang = motionProxy.getAngles("HeadYaw", False)[0]
+    motionProxy.setAngles("HeadYaw", ang+0.1, 0.5)
+
+def rotate_head_right():
+    ang = motionProxy.getAngles("HeadYaw", False)[0]
+    motionProxy.setAngles("HeadYaw", ang-0.1, 0.5)
+
 def get_tray_angle():
     xl, yl, _, _, _, _ = motionProxy.getPosition("LHand", 2, True)
     xr, yr, _, _, _, _ = motionProxy.getPosition("RHand", 2, True)
@@ -314,11 +333,40 @@ def is_x_position_positive(curr_x_pos):
         res = True
     return res
 
+def get_q_angle_state(ang):
+    a_bin = (math.floor(((ang + np.pi) / (2*np.pi)) * num_angles + num_angles//4))%num_angles
+    return a_bin
+
+min_state = get_q_angle_state(min_angle)+1
+max_state = get_q_angle_state(max_angle)-1
+num_nao_angles = max_state - min_state
+
 def get_inputs(prev_x_pos, curr_x_pos, prev_time, curr_time):
-    pos = is_x_position_positive(curr_x_pos)
-    vel = is_x_velocity_positive(prev_x_pos, curr_x_pos, prev_time, curr_time)
+    pos = 0
+    if is_x_position_positive(curr_x_pos):
+        pos = 1  # Go anticlockwise
+    vel = 0
+    if is_x_velocity_positive(prev_x_pos, curr_x_pos, prev_time, curr_time):
+        vel = 1  # Go anticlockwise
     ang = get_tray_angle()
-    return pos, vel, ang
+    print(ang, get_q_angle_state(ang))
+    ang_state = int(get_q_angle_state(ang) - min_state)
+    if ang_state >= num_nao_angles:
+        ang_state = int(num_nao_angles - 1)
+    return pos, vel, ang_state
+
+def write_to_config(section, var):
+    config = ConfigParser.ConfigParser()
+    config.read('config.ini')
+    config.set("nao_params", section, var)
+    conf = open('config.ini', 'w+')
+    config.write(conf)
+
+
+
+interpolate_left_to_right = False
+
+
 
 
 run_nao = True
@@ -388,27 +436,127 @@ while run_nao:
     elif inp == "track":
         print track_red_ball()
     elif inp == "trackshow":
-        prev_pos = track_red_ball()[0]
+        #print tracker.getTimeOut()
+        tracker.setTimeOut(100) #Originally 3000
+        prev_pos = track_red_ball()[1] #y is accross, x is directly forward
         prev_time = time.time()
         time.sleep(0.05)
+        prev_vel = True
+        prev_vels = []
+        num_prev_vels = 5
         for i in range(0, 300):
             #time.sleep(0.5)
-            curr_pos = track_red_ball()[0]
+            curr_pos = track_red_ball()[1]
             curr_time = time.time()
             images = camProxy.getImageRemote(videoClient)
             imgs = images2.toCVImg(images)
             cv2.imshow("image", imgs)
             cv2.waitKey(1)
+            #print(tracker.getTargetPosition(0)[1], tracker.getTargetPosition(1)[1], tracker.getTargetPosition(2)[1])
             pos, vel, ang = get_inputs(prev_pos, curr_pos, prev_time, curr_time)
             print(pos, vel, ang)
-            #print(get_ball_x_velocity(prev_pos, curr_pos, prev_time, curr_time), is_x_velocity_positive(prev_pos, curr_pos, prev_time, curr_time), tracker.isTargetLost())
+            if tracker.isTargetLost() and len(prev_vels) == num_prev_vels:
+                if prev_vels[0] == True:
+                    rotate_head_right()
+                else:
+                    rotate_head_left()
+                print "LOST", prev_vel
+            elif len(prev_vels) < num_prev_vels: #Only update velocity if ball is not lost
+                prev_vels.append(vel)
+            else:
+                prev_vels.pop(0)
+                prev_vels.append(vel)
+            #print(prev_vels)
+            
             prev_pos = curr_pos
             prev_time = curr_time
+    elif inp == "intertrack":
+        prev_pos = track_red_ball()[1] #y is accross, x is directly forward
+        prev_time = time.time()
+        prev_vels = []
+        num_prev_vels = 5
+        lost_counter = 0
+        max_lost = 5
+
+        num_interpolations = 14
+        ang = 3
+        for j in range(0, 40):
+            #start_angs = interpolate2(tiltLeft, tiltRight, starting_angles, 5, 20)
+            #interpolate_left_to_right = not interpolate_left_to_right
+            #if interpolate_left_to_right:
+            #    start_angs = interpolate2(tiltRight, tiltLeft, starting_angles, num_interpolations+1, 20)
+            
+            #go_to_angles(start_angs, joints, motionProxy)
+            
+
+            for i in range(6, num_interpolations+1):
+                new_angs = interpolate2(tiltLeft, tiltRight, starting_angles, ang, num_nao_angles)
+                #if interpolate_left_to_right:
+                #    new_angs = interpolate2(tiltRight, tiltLeft, starting_angles, 20-i, 20)
+                go_to_angles(new_angs, joints, motionProxy)
+                #time.sleep(0.1)
+                
+                curr_pos = track_red_ball()[1]
+                curr_time = time.time()
+
+                pos, vel, ang_state = get_inputs(prev_pos, curr_pos, prev_time, curr_time)
+                #ang_state = get_q_angle_state(ang_actual)
+                
+                action = np.argmax(learnt_q_matrix[pos][vel][ang_state])
+                if action == 0:
+                    ang += 1
+                elif action == 1:
+                    ang -= 1
+                if ang < 0:
+                    ang = 0
+                if ang > num_nao_angles:
+                    ang = num_nao_angles
+                print(pos, vel, ang_state, action, ang, curr_pos)
+                
+                if tracker.isTargetLost() and len(prev_vels) == num_prev_vels:
+                    lost_counter+=1
+                    if lost_counter > max_lost:
+                        prev_vels[0] = not prev_vels[0]
+                        lost_counter = -max_lost # So does not get stuck between 2 angles
+                    if prev_vels[0] == True:
+                        rotate_head_right()
+                    else:
+                        rotate_head_left()
+                elif len(prev_vels) < num_prev_vels: #Only update velocity if ball is not lost
+                    prev_vels.append(vel)
+                else:
+                    lost_counter = 0
+                    prev_vels.pop(0)
+                    prev_vels.append(vel)
+
+                #images = camProxy.getImageRemote(videoClient)
+                #imgs = images2.toCVImg(images)
+                #cv2.imshow("image", imgs)
+                #cv2.waitKey(1)
+                #time.sleep(0.1)
+
+                prev_pos = curr_pos
+                prev_time = curr_time
+    elif inp == "balance":
+        ang = 0
+        prev_pos = track_red_ball()[1] #y is accross, x is directly forward
+        prev_time = time.time()
+        for i in range(0, 100):
+            new_angs = interpolate2(tiltLeft, tiltRight, starting_angles, ang, num_nao_angles)
+            go_to_angles(new_angs, joints, motionProxy)
+            curr_pos = track_red_ball()[1]
+            curr_time = time.time()
+            pos, vel, ang = get_inputs(prev_pos, curr_pos, prev_time, curr_time)
+
+
     elif inp == "angle":
         print get_tray_angle()
     elif inp == "follow":
         for i in range(0, 100):
             print track_red_ball()
+    elif inp.split(" ")[0] == "write":
+        params = inp.split(" ")
+        write_to_config(params[1], params[2])
     elif inp == "head":
         head_forward(motionProxy)
     elif inp == 'exit':
@@ -416,20 +564,29 @@ while run_nao:
 
 
 #TODO 
-# Map angles of tray in simulation to angles of tray in robot - just restrict the angles that the simulation can go between - or even just scale the angle of the robot
-#   tray to be within the bounds of the angles that the simulated tray goes between
-# Find a way to get angle of robot tray - get position of hands, and find line between them
-#   for tilting forward and back, can probably just use the angle of the elbow
-# Make sure vision can track the ball all the way - view image as it turns its head
+# Find a way for it to move the ball back into middle if is at edge
+# Refactor code
+# Refine the simulation - maybe add more vel and pos possabilities, maybe add a dont move optiton
+# Try different ways of training
+# Look into training the nao live, whilst it balances 
+# Look into learning from hisroty - have nao remember runs that it did that were good and learn off those
+# Read dqn atari (or something) paper
+
+# CHRISTMAS TODO:
+# Read papers on reinforcement learning, Q learning, DQN, then write up the literature review and surrounded reading for the report
+# Improve the simulation such that it moves the ball into the centre and keeps it there as opposed to just balancing
+    # Possible way to do this, measure whether the change in state is closer to optimal state of flat tray and central ball
+# Refactor code
+
+#Interesting points
+# Runs much better without showing the photos
 # Not exact directions does not matter, since has can just split it into x and y coordinates
 
 #THings to do
-# get it into a state where there is a get_all_inputs() function that gets all the nexessary information for training
+# Make lose ball tracking work - think its better to rememebr the last five or so velocities, since doesn't immediately recognise that the ball is lost
 
 #Things to do later
 # training via a video input a la the atari games
 
-#INputs to get
-# position of ball - left or right
-# speed of ball - positive or negative
-# angle of tray
+# REMEMBER YOU HAVE TO REMAKE THE Q MATRIX EACH TIME CHANGE CONFIG PARAMS
+# ALTERNATIVELY, MOVE THE GENERATE REDUCED Q INTO THIS FILE FROM LTB.PY
