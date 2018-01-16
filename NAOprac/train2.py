@@ -184,73 +184,12 @@ def calculate_reward(ball_var, a_bin, a_bin_new):
     return reward
 
 
-def normalised(Q, q_var, p_var, v_var, a_var):
+def normalisedOLD(Q, q_var, p_var, v_var, a_var):
     if sum(Q[p_var][v_var][a_var]) > 0:
         for i in range(0, len(Q[p_var][v_var][a_var])):
             q_var[p_var][v_var][a_var][i] = Q[p_var][v_var][a_var][i]/sum(Q[p_var][v_var][a_var])
     return q_var
-"""
-# TODO:
-# Allow it to loop different parameters in order to compare training times
-# Save to file the results of the training
 
-# PARAMETERS AND MAIN LOOP
-NUM_ACTIONS = 2  # Number of actions that can be take. Normally 2, rotate clockwise or anticlockwise
-NUM_X_DIVS = 2  # Number of divisions x plane is split into, for whole tray
-NUM_VELOCITIES = 2  # Number of velocity buckets
-NUM_ANGLES = 200 #2 * np.pi
-#MAX_ANGLE = math.atan((y_pos - stop_y)/abs(x_pos - stop_x_left))
-MAX_VELOCITY = 400#math.sqrt(2 * mass/100 * 981/100 * math.sin(MAX_ANGLE) * w)  # Using SUVAT and horizontal component of gravity, /100 because of earlier values seem to be *100
-
-#Q = np.zeros((NUM_X_DIVS, NUM_VELOCITIES, NUM_ANGLES, NUM_ACTIONS))
-
-ball_radius = 25
-ball = add_ball(400, 200, 1, ball_radius)
-
-iterations = 0
-
-rotation = 10000
-
-TIME_THRESHOLDS = [0.4, 0.6]
-SCALE_REDUCTIONS = [1.7]
-LEARN_RATES = [0.7]
-NUM_ANGLES_OPTIONS = [540, 720]
-NUM_VELOCITIES_OPTIONS = [15, 20]
-NUM_X_DIVS_OPTIONS = [15, 25]
-P_params = [TIME_THRESHOLDS, SCALE_REDUCTIONS, LEARN_RATES, NUM_ANGLES_OPTIONS, NUM_VELOCITIES_OPTIONS, NUM_X_DIVS_OPTIONS]
-P_defaults = [0.3, 1.6, 0.5, NUM_ANGLES, NUM_VELOCITIES, NUM_X_DIVS]
-
-Q = np.zeros((P_defaults[5], P_defaults[4], P_defaults[3], NUM_ACTIONS))
-
-best_time = 0
-very_best_time = 0
-start_time = time.time()
-time_threshold = 0.7
-real_time_threshold = 30
-
-explore_rate = 0
-learnRate = 0.5
-scale_reduction = 1.7
-
-threshold_counter = 0
-num_thresholds = 15
-max_num_iterations = 1000
-
-log = open("log.txt", "a")
-
-defo_running = True
-DO_PARAM_TEST = False
-DONT_SHOW_ONCE_DONE = False
-TRAINING = True
-if TRAINING:
-    scale_reduction = 1.7
-    explore_rate = 1
-    log.write("\n\nStarting training\n\n")
-else:
-    Q = np.load("qGood.npy")
-
-P_vars = [time_threshold, scale_reduction, learnRate, NUM_ANGLES, NUM_VELOCITIES, NUM_X_DIVS]
-"""
 
 def next_params(var_name, var_pos, defaults, params):
     res = copy.copy(defaults)
@@ -263,11 +202,11 @@ class BallBalancer:
     def __init__(self):
         
         self.tray_width = 400
-        self.tray_height = 20
+        self.tray_height = 0.001
         self.tray_x_pos = 300
         self.tray_y_pos = 100
         self.tray_angle = -0.05#np.pi / 24
-        self.rotation = 50000
+        self.rotation = 80000
         
         self.ball_radius = 25
 
@@ -279,9 +218,10 @@ class BallBalancer:
 
         self.MAX_ANGLE = float(config["nao_params"]["left_angle_max"])
         self.MIN_ANGLE = float(config["nao_params"]["right_angle_max"])
-        #print(self.MIN_ANGLE, self.MAX_ANGLE)
+        print(self.MIN_ANGLE, self.MAX_ANGLE)
 
         self.NUM_NAO_ANGLES = (self.__get_state(0, 0, self.MAX_ANGLE)[2]-1) - (self.__get_state(0, 0, self.MIN_ANGLE)[2]+1)
+        self.NUM_ANGLE_BINS = self.NUM_NAO_ANGLES
         self.first_ang = self.__get_state(0, 0, self.MIN_ANGLE)[2]+1
         self.last_ang = self.__get_state(0, 0, self.MAX_ANGLE)[2]-1
         #int((abs(self.MAX_ANGLE) + abs(self.MIN_ANGLE)) / (np.pi*2.0) * float(self.NUM_ANGLES))
@@ -296,8 +236,8 @@ class BallBalancer:
         self.real_time_threshold = 30
 
         self.explore_rate = 0.2
-        self.learn_rate = 0.5
-        self.discount_factor = 1.0
+        self.learn_rate = 0.8
+        self.discount_factor = 0.9
         self.scale_reduction = 2#1.7
 
         self.max_time = 100
@@ -320,8 +260,19 @@ class BallBalancer:
 
         self.num_dists = 0
         self.tot_dist = 0
+        self.num_frames_off_tray = 0  # The number of frames in which the ball has not been in contact with the tray
+        self.length_on_tray = 50
 
         self.trained = False
+        self.draw = True
+
+        self.prev_ball_pos = 0
+
+        self.speed_past_origin = None
+
+        self.ball_changed_direction = False
+        self.was_negative = False
+        self.was_positive = False
 
     def perform_episode(self):
         # GET THE STATES
@@ -362,10 +313,10 @@ class BallBalancer:
         self.space._set_gravity(Vec2d(0, -981))
         self.draw_options = pymunk.pygame_util.DrawOptions(self.screen)
 
-        #print(self.NUM_NAO_ANGLES, self.__get_state(0, 0, 0)[2], self.__get_state(0, 0, self.MIN_ANGLE)[2]+1, self.__get_state(0, 0, self.MAX_ANGLE)[2]-1)
+        print(self.NUM_NAO_ANGLES, self.__get_state(0, 0, 0)[2], self.__get_state(0, 0, self.MIN_ANGLE)[2]+1, self.__get_state(0, 0, self.MAX_ANGLE)[2]-1)
 
     def create_world(self):
-        fp = [(self.tray_width/2, -self.tray_height/2), (-self.tray_width/2, self.tray_height/2), (self.tray_width/2, self.tray_height/2), (-self.tray_width/2, -self.tray_height/2)]
+        fp = [(self.tray_width/2, -self.tray_height/2), (-self.tray_width/2, self.tray_height/2-10), (self.tray_width/2, self.tray_height/2-10), (-self.tray_width/2, -self.tray_height/2)]
         mass = 100
         moment = pymunk.moment_for_poly(mass, fp[0:2])
 
@@ -380,7 +331,11 @@ class BallBalancer:
         j = pymunk.PinJoint(self.trayBody, trayJointBody, (0, 0), (0, 0))
         self.space.add(j)
 
-        self.__add_ball(400, 200, 1, self.ball_radius, self.tray_width)
+        #self.__add_ball(400, 200, 1, self.ball_radius, self.tray_width)
+    
+    def update_tray_angle(self, angle):
+        self.trayBody.angle = angle
+        self.tray_angle = angle
 
     def check_reset(self):
         reset = False
@@ -393,7 +348,7 @@ class BallBalancer:
         self.trayBody.angle = random.randrange(-15, 15, 1)/100
         self.trayBody.angular_velocity = 0
         # remove_ball(ball)
-        self.__add_ball(self.tray_x_pos, 150, 1, self.ball_radius, self.tray_width)
+        self.add_ball(self.tray_x_pos, 150, 1, self.ball_radius, self.tray_width)
         self.start_time = time.time()
 
     def update_ball(self):
@@ -444,8 +399,6 @@ class BallBalancer:
         elif p_bin < 0:
             #print("UNDER", p_bin)
             p_bin = 0
-        if abs(vel) >= self.MAX_VELOCITY:
-            v_bin = -1 
         #print("PBIN", p_bin, pos)
         return p_bin, v_bin, a_bin
 
@@ -458,26 +411,95 @@ class BallBalancer:
                 action = np.argmax(self.Q[p_var][v_var][a_var])
         return action
 
-    # dist is distance from centre to apply the force, a_bin is the bin of the current angle of the tray
-    def __change_state(self, dist, a_bin):
-        action = self.ball.current_action
-        #count = 0
+    def action_to_num_and_dir(self, action, num_actions):
+        num_actions_in_each_dir = math.ceil(num_actions/2.0)
+        num = (action % num_actions_in_each_dir) + 1
+        dire = -1
+        if action >= num_actions_in_each_dir:
+            dire = 1
+            num = (num_actions_in_each_dir+1) - num
+        #print("act:", action, "na:", num_actions, "ned:", num_actions_in_each_dir, "num:", num, "dir:", dire)
+        return num, dire
+
+    # direction=-1 is clockwise
+    # direction=1 is anticlockwise
+    def do_action(self, num_of_angs_to_move, direction, slow=False, record=True, draw=False, speed=60):
         turn = True
-        while turn:
-            if action == 0:
-                if self.trayBody.angle > self.__get_centre_of_ang_bin((a_bin-1)%self.NUM_ANGLES) and self.trayBody.angle > self.MIN_ANGLE:
-                    #print(self.trayBody.angle)
-                    self.trayBody.apply_force_at_local_point(Vec2d.unit() * self.rotation, (-dist, 0))  # rotate flipper clockwise
+        if not abs(direction) == 1:
+            direction = 0
+            turn = False
+            print("DIRECTION VALUE IS WRONG IN do_action")
+        target_bin = self.a + direction*num_of_angs_to_move  # The bin of the angle we are aiming for
+        target_angle = self.MIN_ANGLE + target_bin * (self.MAX_ANGLE - self.MIN_ANGLE)/self.NUM_ANGLE_BINS  # The actual angle we are aiming for NUM_ANGLE_BINS should be changes, probably to a parameter
+        if target_bin >= self.NUM_ANGLE_BINS:
+            target_bin = self.NUM_ANGLE_BINS - 1
+        elif target_bin < 0:
+            target_bin = 0
+        if target_angle > self.MAX_ANGLE:
+            target_angle = self.MAX_ANGLE
+        elif target_angle < self.MIN_ANGLE:
+            target_angle = self.MIN_ANGLE
+        while turn and self.is_ball_on_tray(self.length_on_tray):
+            #print(self.trayBody.angle, target_angle, self.MIN_ANGLE, target_bin)
+            if direction == -1:
+                if self.trayBody.angle > target_angle and self.trayBody.angle > self.MIN_ANGLE:  # Keep rotating util we are past the angle we are aiming for
+                    self.trayBody.apply_force_at_local_point(Vec2d.unit() * self.rotation, (-self.tray_width/2, 0))  # rotate flipper clockwise
                 else:
                     turn = False
-            elif action == 1:
-                if self.trayBody.angle < self.__get_centre_of_ang_bin((a_bin+1)%self.NUM_ANGLES) and self.trayBody.angle < self.MAX_ANGLE:
-                    self.trayBody.apply_force_at_local_point(Vec2d.unit() * self.rotation, (dist, 0))  # rotate flipper anticlockwise
+                    self.ball.body.velocity[1] = 0
+                    #self.trayBody.angular_velocity = 0
+            elif direction == 1:
+                #print(self.NUM_ANGLE_BINS, self.trayBody.angle, target_angle, self.MIN_ANGLE, target_bin)
+                if self.trayBody.angle < target_angle and self.trayBody.angle < self.MAX_ANGLE:
+                    self.trayBody.apply_force_at_local_point(Vec2d.unit() * self.rotation, (self.tray_width/2, 0))  # rotate flipper anticlockwise
                 else:
                     turn = False
-            dt = 1.0/60.0/5.
-            for x in range(5):
-                self.space.step(dt)
+                    self.ball.body.velocity[1] = 0
+                    #self.trayBody.angular_velocity = 0
+            #dt = 1.0/60.0/5.
+            #for x in range(5):
+            #    self.space.step(dt)
+
+            self.step_simulation(slow, record, draw, speed)
+
+            # if self.draw:
+            #     self.screen.fill(THECOLORS["white"])
+            #     self.space.debug_draw(self.draw_options)
+
+            #     self.clock.tick(50)
+            #     pygame.display.flip()
+            # c_speed = trainer.speed_of_ball_at_centre()
+            # if c_speed is not None:
+            #     print(c_speed)
+        self.a = target_bin
+        self.trayBody.angular_velocity = 0
+        #self.ball.body.velocity[1] = 0
+        #self.ball_body.velocity[1] = 0.0
+        #print(self.ball_body.velocity)
+        self.prev_ball_pos = self.get_pos_ball_along_tray()
+        
+
+    # dist is distance from centre to apply the force, a_bin is the bin of the current angle of the tray
+    # def __change_state(self, dist, a_bin):
+    #     action = self.ball.current_action
+    #     #count = 0
+    #     turn = True
+    #     while turn:
+    #         if action == 0:
+    #             if self.trayBody.angle > self.__get_centre_of_ang_bin((a_bin-1)%self.NUM_ANGLES) and self.trayBody.angle > self.MIN_ANGLE:
+    #                 #print(self.trayBody.angle)
+    #                 self.trayBody.apply_force_at_local_point(Vec2d.unit() * self.rotation, (-dist, 0))  # rotate flipper clockwise
+    #             else:
+    #                 turn = False
+    #         elif action == 1:
+    #             if self.trayBody.angle < self.__get_centre_of_ang_bin((a_bin+1)%self.NUM_ANGLES) and self.trayBody.angle < self.MAX_ANGLE:
+    #                 self.trayBody.apply_force_at_local_point(Vec2d.unit() * self.rotation, (dist, 0))  # rotate flipper anticlockwise
+    #             else:
+    #                 turn = False
+    #         dt = 1.0/60.0/5.
+    #         for x in range(5):
+    #             self.space.step(dt)
+
             #print(self.trayBody.angle, action)
                     #print(action, "ANG:", self.trayBody.angle > self.__get_centre_of_ang_bin((a_bin-1)%self.NUM_ANGLES), self.trayBody.angle, self.__get_centre_of_ang_bin((a_bin-1)%self.NUM_ANGLES))
                     #self.ball.current_position = self.__get_ball_pos_x(self.ball)
@@ -495,12 +517,37 @@ class BallBalancer:
             #        count+=1
                 #print(action, "ANG:", self.trayBody.angle < self.__get_centre_of_ang_bin((a_bin+1)%self.NUM_ANGLES), self.trayBody.angle, self.__get_centre_of_ang_bin((a_bin+1)%self.NUM_ANGLES))
         #print(count)
-        self.ball.current_position = self.__get_ball_pos_x(self.ball)
-        self.ball.current_velocity = self.ball.body.velocity[0]
-        self.ball.current_angle = self.trayBody.angle
-        ppp, vvv, aaa = self.__get_state(self.ball.current_position, self.ball.current_velocity, self.ball.current_angle)
-        self.trayBody.angular_velocity = 0
-        return ppp, vvv, aaa
+        # self.ball.current_position = self.__get_ball_pos_x(self.ball)
+        # self.ball.current_velocity = self.ball.body.velocity[0]
+        # self.ball.current_angle = self.trayBody.angle
+        # ppp, vvv, aaa = self.__get_state(self.ball.current_position, self.ball.current_velocity, self.ball.current_angle)
+        # self.trayBody.angular_velocity = 0
+        # return ppp, vvv, aaa
+
+    def step_simulation(self, slow_tray=True, record_speed=True, draw=False, draw_speed=60):
+        #self.ball.body.velocity[1] = 0
+       
+        dt = 1.0/60.0/5.
+        for x in range(5):
+            self.space.step(dt)
+
+        if slow_tray:
+            self.trayBody.angular_velocity = 0
+
+        if record_speed:
+            c_speed = self.speed_of_ball_at_centre()
+            if c_speed is not None:
+                self.speed_past_origin = c_speed
+            else:
+                self.speed_past_origin = None
+
+            self.ball_changed_direction = self.has_ball_changed_direction()  # Used because an action is only good if it changes the direction of the ball
+
+        if draw:
+            self.draw_scene(draw_speed)
+
+        
+        
 
     def __calculate_reward(self, a_bin, a_bin_new):
         reward = 0
@@ -535,8 +582,8 @@ class BallBalancer:
         # reward3 = 1 - abs(self.ball.current_angle)/abs(self.MAX_ANGLE) # If tray flatter, reward higher
         # reward3 = (reward3 -0.5) *2
         #reward = (reward + reward2 + reward3)/3
-        #if self.trained:
-        #    print(reward, "\n")
+        if self.trained:
+            print(reward, "\n")
         #print(reward, 1 - abs(self.tray_x_pos - self.ball.current_position)/(self.tray_width/2.0), (1.0 - abs(self.v - (self.NUM_VELOCITIES/2.0)) / (self.NUM_VELOCITIES/2.0)), (1.0 - abs(self.ball.current_angle)/abs(self.MAX_ANGLE)))
         return reward
 
@@ -553,14 +600,31 @@ class BallBalancer:
         #        q_var[p_var][v_var][a_var][i] = self.Q[p_var][v_var][a_var][i]/sum(self.Q[p_var][v_var][a_var])
         return q_var
 
-    def __add_ball(self, xpos, ypos, mass, radius, tray_width):
+    def normalised(self, q, actions):
+        sumup = 0
+        for i in actions:
+            sumup += abs(i)
+        actions_copy = copy.copy(actions)
+        if sumup > 0:
+            for i in range(0, len(actions)):
+                actions_copy[i] = actions[i]/sumup
+        return actions_copy
+
+    def add_ball(self, xdist, vel, angle=0, mass=1, radius=25):
+        if angle == 0:
+            angle = self.tray_angle
         inertia = pymunk.moment_for_circle(mass, 0, radius, (0,0))
         body = pymunk.Body(1, inertia)
-        body.position = random.randint(xpos - tray_width/4, xpos + tray_width/4), ypos
+        ang = np.pi/2 - angle - np.arctan2(radius, xdist)  # Right angle - angle of tray - angle from the tray to the line that goes through the centre of the ball
+        hyp = np.sqrt(xdist * xdist + radius * radius)  # Dist from centre of tray to centre of ball
+        xpos = hyp * np.sin(ang)  # Distance in x direction of ball, from centre of tray
+        ypos = hyp * np.cos(ang)
+        body.position = self.tray_x_pos + xpos, self.tray_y_pos + ypos + 0.1  # extra 0.1 makes sure does not lie in the tray
         shape = pymunk.Circle(body, radius, (0,0))
         shape.elasticity = 0#0.95
+        body.velocity = Vec2d(vel, 0)
         self.space.add(body, shape)
-        shape.current_velocity = 0
+        shape.current_velocity = vel
         shape.current_position = self.__get_ball_pos_x(shape)
         shape.current_action = 0
         shape.current_angle = 0
@@ -568,10 +632,30 @@ class BallBalancer:
         shape.previous_velocity = 0
         shape.previous_position = 0
         shape.previous_angle = 0
+        shape.angle = angle
+        shape.rad = radius
+        shape.xdist = xdist
+        shape.mass = 1#0
+        self.prev_ball_pos = xdist
         self.ball = shape
+        self.ball_body = body
+        self.num_frames_off_tray = 0  # Reset the numebr of frams the ball has been off the tray for
+        self.ball_changed_direction = False  # THIS AND THE NEXT TWO SHOULD BE MADE A PROPERTY OF THE BALL
+        self.was_negative = False
+        self.was_positive = False
+
+    def get_pos_ball_along_tray(self):
+        #ang = np.pi/2 - self.ball.angle - np.arctan2(self.ball.rad, self.ball.xdist)  # Right angle - angle of tray - angle from the tray to the line that goes through the centre of the ball
+        #hyp = np.sqrt(self.ball.xdist * self.ball.xdist + self.ball.rad * self.ball.rad)  # Dist from centre of tray to centre of ball
+        #xpos = hyp * np.sin(ang) 
+        x = self.ball.body.position[0] - self.tray_x_pos
+        return x / np.cos(self.trayBody.angle)
 
     def __remove_ball(self, ball_to_remove):
         self.space.remove(ball_to_remove, ball_to_remove.body)
+
+    def remove_ball(self):
+        self.space.remove(self.ball, self.ball.body)
 
     def __get_ball_pos_x(self, ball):
         pos = -1
@@ -595,11 +679,11 @@ class BallBalancer:
         self.clock = pygame.time.Clock()
         self.draw_options = pymunk.pygame_util.DrawOptions(self.screen)
     
-    def draw(self):
+    def draw_scene(self, draw_speed=60):
         self.screen.fill(THECOLORS["white"])
         self.space.debug_draw(self.draw_options)
 
-        self.clock.tick(10)
+        self.clock.tick(draw_speed)
         pygame.display.flip()
     
     def continue_running(self):
@@ -618,7 +702,10 @@ class BallBalancer:
         return self.__get_state(self.ball.current_position, self.ball.current_velocity, self.ball.current_angle)
 
     def get_ball_info(self):
-        return self.ball.current_position, self.ball.current_velocity, self.ball.current_angle
+        pos = self.get_pos_ball_along_tray()
+        vel = self.get_x_velocity(self.ball.body.velocity)
+        ang = self.trayBody.angle
+        return pos, vel, ang
 
     def avg_dist(self):
         self.tot_dist += abs(self.ball.current_position)
@@ -629,175 +716,208 @@ class BallBalancer:
         self.tot_dist = 0
         self.num_dists = 0
 
-def setup_q_trainer():
+    def is_ball_on_tray(self, limit=50):
+        val = False
+        if len(self.ball.shapes_collide(self.space.shapes[0]).points) > 0:  # If there is contact, return true
+            val = True
+            
+            self.num_frames_off_tray = 0  # Set the counter for number of frames without contact to zero
+        elif self.num_frames_off_tray < limit:  # If the number of frames without contact is below the threshold. If false, false will be returned i.e. no longer in contact.
+            self.num_frames_off_tray += 1  # increase the counter
+            val = True  # Return true
+            #print(self.num_frames_off_tray)
+        #print(len(self.ball.shapes_collide(self.space.shapes[0]).points), self.num_frames_off_tray)
+        return val
+
+    def speed_of_ball_at_centre(self):
+        vel = None
+        if self.get_pos_ball_along_tray() < 0 and self.prev_ball_pos >= 0:  # If the ball goes past the centre
+            vel = self.get_x_velocity(self.ball.body.velocity)
+            #print( vel, self.ball.body.velocity)
+        elif self.get_pos_ball_along_tray() > 0 and self.prev_ball_pos <= 0:
+            vel = self.get_x_velocity(self.ball.body.velocity)
+            #print( vel, self.ball.body.velocity)
+            #print( self.get_pos_ball_along_tray(),  self.prev_ball_pos)
+        self.prev_ball_pos = self.get_pos_ball_along_tray()
+        #print(self.get_pos_ball_along_tray(), self.prev_ball_pos)
+        return vel
+
+    def has_ball_changed_direction(self):
+        has_changed = False
+        vel = self.get_x_velocity(self.ball.body.velocity)
+        if self.was_positive and vel < 0:  # Check if is negative, and has been positive at any point
+            has_changed = True
+            self.was_negative = True 
+        elif vel < 0:  # Register that has been negative
+            self.was_negative = True 
+        elif self.was_negative and vel > 0:  # Check if is positive, and has been negative at any point
+            has_changed = True 
+            self.was_positive = True
+        elif vel > 0:
+            self.was_positive = True
+        return has_changed
+
+    def get_x_velocity(self, vel):
+        z = np.sqrt(vel[0]*vel[0] + vel[1] * vel[1])
+        if vel[0] < 0:
+            z = z*-1
+        return z
+
+    def get_bin(self, val, max_val, num_val_bins): #CHECK THIS WORKS WITH ALL VALUES
+        val_percent = (val+max_val) / (2 * max_val)
+        val_bin = math.floor(val_percent * num_val_bins)
+        if val_bin < 0:
+            val_bin = 0
+        elif val_bin >= num_val_bins:
+            val_bin = num_val_bins-1
+        return val_bin
+
+num_bins_ang = 4 # number of angles above and below
+num_bins_pos = 40
+num_bins_vel = 30
+num_actions = num_bins_ang * 2  # First half is clockwise (-1 dir), second half is anticlockwise (1 dir)
+
+max_ang = 0.1
+max_pos = 200
+max_vel = 600
+#init_vel_range = 50
+
+q_mat = np.zeros((num_bins_pos, num_bins_vel, num_bins_ang, num_actions))
+#q_mat = np.load("q.npy")
+
+def setup_wal_trainer():
     trainer = BallBalancer()
     trainer.set_up_pygame()
     trainer.create_world()
-    start = time.time()
-    trainer.max_draw_iterations = 200
-    trainer.explore_reduction_freq = 50
+
+    trainer.reduction_freq = 2000
+    trainer.random_action_chance = 1
+    trainer.reduction_amount = 1.5
+
+    trainer.length_on_tray = 30
+    trainer.discount_factor = 0
+
+    trainer.NUM_ANGLE_BINS = num_bins_ang  # Make it so dont have to do this
     return trainer
-#trainer.discount_factor = 0.9
-#trainer.learn_rate = 0.9
 
-def do_q_learning(trainer, train=True, load_q=False, save_q=False):
-    if load_q:
-        trainer.Q = np.load("q_learn.npy")
+def do_watch_and_learn_training(trainer, save_q=False):
+    i = 0
+    while i < 20000 and trainer.continue_running():
+        new_ang = (random.randint(0, max_ang*100)/100) * ((-1)**(random.randint(1,2)))  # Random andgle the tray will be for this test
+        new_pos = random.randint(0, max_pos) * ((-1)**(random.randint(1,2)))  # Random position of the ball on the tray for this test
+        new_vel = random.randint(0, max_vel) * ((-1)**(random.randint(1,2)))  # Random velocity of the ball for this test
 
-    if not train:
-        trainer.iterations = trainer.max_draw_iterations
-    
-    running = True
-    while running:
-        trainer.perform_episode()
-        trainer.update_ball()
+        if random.random() < 0.5:  # Get it into a smaller range more often, as these values are seen much more
+            new_pos = new_pos // 2.0
+            new_vel = new_vel // 2.0 
 
-        if trainer.iterations == trainer.max_draw_iterations:
-            trainer.explore_rate = 0
-            trainer.a_high = 0
-            trainer.a_low = trainer.NUM_ANGLES
-            trainer.reset_draw()
-            trainer.trained = True
-        if trainer.iterations > trainer.max_draw_iterations:
-            trainer.draw()
-            a, b, c = trainer.get_ball_info_bins()
-            print("Q:", a, b, c, trainer.Q[a, b, c], trainer.get_ball_info())
+        trainer.update_tray_angle(new_ang)  # Move the tray to the chosen position
+        trainer.add_ball(new_pos, new_vel)  # Add the new ball
 
-        if trainer.check_reset():
-            trainer.compare_times(time.time())
-            trainer.reduce_explore_rate()
-            trainer.reset_scenario()
-            trainer.iterations += 1
-            trainer.reset_avg_dist()
+        #print("\n\n\n")
 
-        running = trainer.continue_running()
-    
+        while trainer.is_ball_on_tray():  # See what happens after action has taken place
+
+            bin_ang = trainer.get_bin(new_ang, max_ang, num_bins_ang)
+            trainer.a = bin_ang
+            bin_pos = trainer.get_bin(new_pos, max_pos, num_bins_pos)
+            bin_vel = trainer.get_bin(new_vel, max_vel, num_bins_vel)
+            
+            random_action = random.random()
+            action = np.argmax(q_mat[bin_pos][bin_vel][bin_ang])  # The action to take, the one with biggest value for the chosen pos, vel, ang values
+            if random_action < trainer.random_action_chance:
+                action = random.choice(range(0, num_actions))  # Do a random action instead
+
+            num_bins, direction = trainer.action_to_num_and_dir(action, num_actions)  # Use that value to get the number of angle bins to rotate round, and in what direction
+            #print("ANG:", new_ang, bin_ang, "  POS:", new_pos, bin_pos, "  VEL:", new_vel, bin_vel, "  BINS:", num_bins, "  DIR:", direction)
+            #print("ang b4:", trainer.trayBody.angle)
+            #print("angle", trainer.trayBody.angle, bin_ang, "\naction", action, "\ndir", direction, "\nnum bins", num_bins, "\n\n")
+            reward = -1
+
+            trainer.do_action(num_bins, direction, draw=False, speed=1000)  # Carry out that action
+
+            new_pos, new_vel, new_ang = trainer.get_ball_info()
+
+            pos_reward = 1 - abs(new_pos) / max_pos
+            vel_reward = 1 - abs(new_vel) / max_vel
+            #ang_reward = 1 - abs(new_ang) / max_ang
+            #if pos_reward < 1 and vel_reward < 1:
+            #    print(pos_reward, vel_reward, (pos_reward + vel_reward)/2.0)
+            #else:
+            #    print(-1)
+            #if trainer.speed_past_origin is not None and trainer.ball_changed_direction:
+            #    reward = 1 - (abs(trainer.speed_past_origin) / max_vel)
+            #    print("Speed:", trainer.speed_past_origin, "Reward:", reward)
+
+        curr_val = copy.copy(q_mat[bin_pos][bin_vel][bin_ang][action])
+        q_mat[bin_pos][bin_vel][bin_ang][action] = curr_val + trainer.learn_rate * (reward + trainer.discount_factor * (max(q_mat[bin_pos][bin_vel][bin_ang]) - curr_val))
+        q_mat[bin_pos][bin_vel][bin_ang] = trainer.normalised(q_mat, q_mat[bin_pos][bin_vel][bin_ang])
+        #print("HI", curr_val, trainer.learn_rate, reward, trainer.discount_factor, max(q_mat[bin_pos][bin_vel][bin_ang]), q_mat[bin_pos][bin_vel][bin_ang][action])
+
+            #trainer.draw_scene()
+            #c_speed = trainer.speed_of_ball_at_centre()
+            #if c_speed is not None:
+            #    print(c_speed)
+            #trainer.is_ball_on_tray()
+        trainer.remove_ball()
+
+        i+=1
+
+        if i % trainer.reduction_freq == 0:
+            trainer.random_action_chance /= trainer.reduction_amount
+            print(i)
+        #trainer.step_simulation(True, True, True)
+        #trainer.draw_scene()
     if save_q:
-        np.save("q_learn", trainer.Q)
+        np.save("q_wal", q_mat)
+
+    
+
+def do_watch_and_learn_evaluation(trainer, n=10):
+    q_mat = np.load("q_wal.npy")
+    for i in range(0, n):        
+        # Generate random starting position, velocity and angle for ball
+        new_pos = random.randint(0, max_pos) * ((-1)**(random.randint(1,2)))  # Random position of the ball on the tray for this test
+        new_vel = random.randint(0, max_vel) * ((-1)**(random.randint(1,2)))  # Random velocity of the ball for this test
+        new_ang = (random.randint(0, max_ang*100)/100) * ((-1)**(random.randint(1,2)))  # Random andgle the tray will be for this test
+
+        trainer.update_tray_angle(new_ang)  # Move the tray to the chosen position
+        trainer.add_ball(new_pos, new_vel)  # Add the new ball
+        print("START", i, new_pos, new_vel, new_ang)
+        while trainer.is_ball_on_tray(trainer.length_on_tray) and trainer.continue_running():
+            trainer.reset_draw()
+            bin_pos = trainer.get_bin(new_pos, max_pos, num_bins_pos)
+            bin_vel = trainer.get_bin(new_vel, max_vel, num_bins_vel)
+            bin_ang = trainer.get_bin(new_ang, max_ang, num_bins_ang)
+            action = np.argmax(q_mat[bin_pos][bin_vel][bin_ang])
+            
+            num_bins, direction = trainer.action_to_num_and_dir(action, num_actions)
+            print("\n\npos:", new_pos, bin_pos, "\nvel:", new_vel, bin_vel, "\nang:", new_ang, bin_ang, "\nact:", action, "\nbins:", num_bins, " dir:", direction, "\nq:", q_mat[bin_pos][bin_vel][bin_ang])
+            trainer.do_action(num_bins, direction, draw=True, speed=60)
+            #print(q_mat[bin_pos][bin_vel][bin_ang], action)
+            #for j in range(0, 1):
+            #    trainer.step_simulation(True, True, True, 60)
+            new_pos, new_vel, new_ang = trainer.get_ball_info()
+            #print(i, new_pos, new_vel, new_ang)
+        print("FOT:", trainer.num_frames_off_tray)
+        trainer.remove_ball()
 
 
 
 
-#TODO:
-# Simulation doesn't quite fully work, still varies a lot over a few states. If stop it from learning, it does this weird jaggedy thing when it flips between two states
-# Load the q file and use with the nao
 
+    #TODO:
+    # Read why update q formula works like it does
+    # Implment training with the Q matrix 
 
+###TRAINING
+#Make simulation world
+#While training:
+#   Randomly generate the angle, speed and position of the ball for this current episode of the simulation
+#   Let the simulation happen
+#   Generate a reward for how well it did
+#   Update Q
 
-
-"""
-
-var = 0
-val = -1
-while var < len(P_params) and defo_running:
-    if DO_PARAM_TEST:
-        time_threshold, scale_reduction, learnRate, NUM_ANGLES, NUM_VELOCITIES, NUM_X_DIVS = next_params(var, val, P_defaults, P_params)
-        Q = np.zeros((NUM_X_DIVS, NUM_VELOCITIES, NUM_ANGLES, NUM_ACTIONS))
-        print(time_threshold, scale_reduction, learnRate, NUM_ANGLES, NUM_VELOCITIES, NUM_X_DIVS, var, val)
-    while running and defo_running:
-        for event in pygame.event.get():
-            if event.type == QUIT:
-                running = False
-            elif event.type == KEYDOWN and event.key == K_ESCAPE:
-                running = False
-                defo_running = False
-
-        # GET THE STATES
-        p, v, a = get_state(ball.previous_position, ball.previous_velocity, ball.previous_angle)
-
-        # DECIDE ON THE BEST ACTION
-        ball.current_action = choose_action(p, v, a, Q, explore_rate, NUM_ACTIONS)
-
-        # GET THE STATES ONCE UPDATED
-        p_new, v_new, a_new = change_state(ball, trayBody, rotation, w/2, a, space)
-
-        # UPDATE Q
-        if p_new >= 0 and v_new >= 0 and TRAINING:
-            reward = calculate_reward(ball, a, a_new)
-            Q[p][v][a][ball.current_action] = (1 - learnRate) * Q[p][v][a][ball.current_action] + learnRate * (reward)# + 0.01*((max(Q[p2][v2]))))# - Q[p][v][ball.current_action])))
-            Q = normalised(Q, p, v, a)
-
-        # RESET THE SCENARIO
-        if reset:        
-            iterations += 1
-            trayBody.angle = random.randrange(-15, 15, 1)/100
-            trayBody.angular_velocity = 0
-            ball = add_ball(400, 150, 1, ball_radius)
-
-            t = time.time() - start_time
-            if t > best_time:
-                best_time = t
-            if t > time_threshold and threshold_counter < num_thresholds:
-                threshold_counter += 1
-                print("Threshold", threshold_counter, "Iterations:", iterations, "Time:", t)
-            if iterations % 100 == 0:
-                explore_rate /= scale_reduction
-                print("Iterations:", iterations, "Best:", best_time)
-
-            start_time = time.time()
-            reset = False
-
-        # IF GOOD ENOUGH
-        if (threshold_counter >= num_thresholds) or not TRAINING:
-            explore_rate = 0.0
-            screen.fill(THECOLORS["white"])
-            space.debug_draw(draw_options)
-
-            clock.tick(10)
-            if DONT_SHOW_ONCE_DONE:
-                running = False
-
-        if best_time > real_time_threshold and DONT_SHOW_ONCE_DONE:
-            running = False
-
-        # IF TRAINED TOO MUCH
-        if time.time() - start_time > 100:
-            best_time = time.time() - start_time
-            running = False
-        if iterations >= max_num_iterations and DONT_SHOW_ONCE_DONE:
-            running = False
-
-        # Update velocities
-        ball.previous_velocity = ball.current_velocity
-        ball.previous_position = ball.current_position
-        ball.previous_action = ball.current_action
-        ball.previous_angle = trayBody.angle
-
-        if abs(ball.current_position) > w/2:
-            remove_ball(ball)
-            reset = True
-
-        # Flip screen
-        pygame.display.flip()
-
-        #END OF EPISODE LOOP
-
-    if TRAINING and defo_running:
-        spaces = "    "
-        if iterations >= 10000:
-            spaces = " "
-        elif iterations >= 1000:
-            spaces = "  "
-        elif iterations >= 100:
-            spaces = "   "
-        log.write("ITERATIONS: " + str(iterations) + spaces + "BEST_TIME: " + str(best_time) + "   TIME_THRESHOLD " + str(time_threshold) + "   SCALE_REDUCTION: " + str(scale_reduction) + "   LEARN_RATE: " + str(learnRate) + "   NUM ACTIONS: " + str(NUM_ACTIONS) + "   NUM_X_DIVS: " + str(NUM_X_DIVS) + "   NUM_VELOCITIES: " + str(NUM_VELOCITIES) + "   NUM_ANGLES: " + str(NUM_ANGLES) + "\n")
-        print("WRITING")
-    if TRAINING and best_time > very_best_time and defo_running:
-        np.save("q", Q)
-        very_best_time = best_time
-    if DO_PARAM_TEST:
-        if val == len(P_params[var])-1:
-            val = 0
-            var += 1
-        else:
-            val += 1
-        running = True
-        best_time = 0
-        iterations = 0
-        threshold_counter = 0
-        explore_rate = 1
-        start_time = time.time()
-    else:
-        defo_running = False
-log.close()
-"""
+###ONCE TRAINED
+#Given state of ball, let it do the action
+#Once that action is complete, choose the next one given the new state - may have to wait between doing actions

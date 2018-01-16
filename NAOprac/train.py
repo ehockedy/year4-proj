@@ -446,12 +446,14 @@ class BallBalancer:
                     self.trayBody.apply_force_at_local_point(Vec2d.unit() * self.rotation, (-self.tray_width/2, 0))  # rotate flipper clockwise
                 else:
                     turn = False
+                    self.ball.body.velocity[1] = 0
             elif direction == 1:
                 #print(self.NUM_ANGLE_BINS, self.trayBody.angle, target_angle, self.MIN_ANGLE, target_bin)
                 if self.trayBody.angle < target_angle and self.trayBody.angle < self.MAX_ANGLE:
                     self.trayBody.apply_force_at_local_point(Vec2d.unit() * self.rotation, (self.tray_width/2, 0))  # rotate flipper anticlockwise
                 else:
                     turn = False
+                    self.ball.body.velocity[1] = 0
             #dt = 1.0/60.0/5.
             #for x in range(5):
             #    self.space.step(dt)
@@ -623,6 +625,7 @@ class BallBalancer:
         shape.angle = angle
         shape.rad = radius
         shape.xdist = xdist
+        shape.mass = 10
         self.prev_ball_pos = xdist
         self.ball = shape
         self.num_frames_off_tray = 0  # Reset the numebr of frams the ball has been off the tray for
@@ -769,34 +772,32 @@ max_vel = 600
 #init_vel_range = 50
 
 q_mat = np.zeros((num_bins_pos, num_bins_vel, num_bins_ang, num_actions))
+#q_mat = np.load("q.npy")
+def setup_wal_trainer():
+    trainer = BallBalancer()
+    trainer.set_up_pygame()
+    trainer.create_world()
 
-trainer = BallBalancer()
-trainer.set_up_pygame()
-trainer.create_world()
+    trainer.reduction_freq = 2000
+    trainer.random_action_chance = 1
+    trainer.reduction_amount = 1.5
 
-reduction_freq = 2000
-random_action_chance = 1
-reduction_amount = 1.5
+    trainer.length_on_tray = 30
+    trainer.discount_factor = 0
 
-trainer.length_on_tray = 30
-trainer.discount_factor = 0
+    trainer.NUM_ANGLE_BINS = num_bins_ang  # Make it so dont have to do this
+    return trainer
 
-trainer.NUM_ANGLE_BINS = num_bins_ang  # Make it so dont have to do this
-
-TRAINING = True
-TRAINING = False
-SAVING =  TRAINING
-LOADING = True
-if TRAINING:
+def do_watch_and_learn_training(trainer, iterations=20000, save_q=False):
     i = 0
-    while i < 30000 and trainer.continue_running():
+    while i < iterations and trainer.continue_running():
         new_ang = (random.randint(0, max_ang*100)/100) * ((-1)**(random.randint(1,2)))  # Random andgle the tray will be for this test
         new_pos = random.randint(0, max_pos) * ((-1)**(random.randint(1,2)))  # Random position of the ball on the tray for this test
         new_vel = random.randint(0, max_vel) * ((-1)**(random.randint(1,2)))  # Random velocity of the ball for this test
 
-        if random.random() < 0.5:
-            new_pos = new_pos // 2.0
-            new_vel = new_vel // 2.0 
+        #if random.random() < 0.5:  # Get it into a smaller range more often, as these values are seen much more
+        #    new_pos = new_pos // 2.0
+        #    new_vel = new_vel // 2.0 
 
         trainer.update_tray_angle(new_ang)  # Move the tray to the chosen position
         trainer.add_ball(new_pos, new_vel)  # Add the new ball
@@ -806,11 +807,9 @@ if TRAINING:
         bin_pos = trainer.get_bin(new_pos, max_pos, num_bins_pos)
         bin_vel = trainer.get_bin(new_vel, max_vel, num_bins_vel)
         
-        #num_bins = random.randint(0,trainer.NUM_ANGLE_BINS-1)  # Generate the random number of angles that the tray will move round
-        #direction = random.choice([-1, 1])  # Randomly choose a direction. -1 is clockwise, 1 is anticlockwise
         random_action = random.random()
         action = np.argmax(q_mat[bin_pos][bin_vel][bin_ang])  # The action to take, the one with biggest value for the chosen pos, vel, ang values
-        if random_action < random_action_chance:
+        if random_action < trainer.random_action_chance:
             action = random.choice(range(0, num_actions))  # Do a random action instead
 
         num_bins, direction = trainer.action_to_num_and_dir(action, num_actions)  # Use that value to get the number of angle bins to rotate round, and in what direction
@@ -839,45 +838,44 @@ if TRAINING:
 
         i+=1
 
-        if i % reduction_freq == 0:
-            random_action_chance /= reduction_amount
+        if i % trainer.reduction_freq == 0:
+            trainer.random_action_chance /= trainer.reduction_amount
             print(i)
         #trainer.step_simulation(True, True, True)
         #trainer.draw_scene()
-
+    if save_q:
+        np.save("q_wal", q_mat)
         
-if SAVING:
-    np.save("q", q_mat)
-if LOADING:
-    q_mat = np.load("q.npy")
 
-for i in range(0, 5):
-    
-    # Generate random starting position, velocity and angle for ball
-    new_pos = random.randint(0, max_pos) * ((-1)**(random.randint(1,2)))  # Random position of the ball on the tray for this test
-    new_vel = 0# random.randint(0, max_vel) * ((-1)**(random.randint(1,2)))  # Random velocity of the ball for this test
-    new_ang = (random.randint(0, max_ang*100)/100) * ((-1)**(random.randint(1,2)))  # Random andgle the tray will be for this test
-
-    trainer.update_tray_angle(new_ang)  # Move the tray to the chosen position
-    trainer.add_ball(new_pos, new_vel)  # Add the new ball
-    print("START", i, new_pos, new_vel, new_ang)
-    while trainer.is_ball_on_tray(trainer.length_on_tray) and trainer.continue_running():
-        trainer.reset_draw()
-        bin_pos = trainer.get_bin(new_pos, max_pos, num_bins_pos)
-        bin_vel = trainer.get_bin(new_vel, max_vel, num_bins_vel)
-        bin_ang = trainer.get_bin(new_ang, max_ang, num_bins_ang)
-        action = np.argmax(q_mat[bin_pos][bin_vel][bin_ang])
+def do_watch_and_learn_evaluation(trainer, n=10):
+    q_mat = np.load("q_wal.npy")
+    for i in range(0, 5):
         
-        num_bins, direction = trainer.action_to_num_and_dir(action, num_actions)
-        print("\n\npos:", new_pos, bin_pos, "\nvel:", new_vel, bin_vel, "\nang:", new_ang, bin_ang, "\nact:", action, "\nbins:", num_bins, " dir:", direction, "\nq:", q_mat[bin_pos][bin_vel][bin_ang])
-        trainer.do_action(num_bins, direction, draw=True, speed=60)
-        #print(q_mat[bin_pos][bin_vel][bin_ang], action)
-        #for j in range(0, 1):
-        #    trainer.step_simulation(True, True, True, 60)
-        new_pos, new_vel, new_ang = trainer.get_ball_info()
-        #print(i, new_pos, new_vel, new_ang)
-    print("FOT:", trainer.num_frames_off_tray)
-    trainer.remove_ball()
+        # Generate random starting position, velocity and angle for ball
+        new_pos = random.randint(0, max_pos) * ((-1)**(random.randint(1,2)))  # Random position of the ball on the tray for this test
+        new_vel = 0# random.randint(0, max_vel) * ((-1)**(random.randint(1,2)))  # Random velocity of the ball for this test
+        new_ang = (random.randint(0, max_ang*100)/100) * ((-1)**(random.randint(1,2)))  # Random andgle the tray will be for this test
+
+        trainer.update_tray_angle(new_ang)  # Move the tray to the chosen position
+        trainer.add_ball(new_pos, new_vel)  # Add the new ball
+        print("START", i, new_pos, new_vel, new_ang)
+        while trainer.is_ball_on_tray(trainer.length_on_tray) and trainer.continue_running():
+            trainer.reset_draw()
+            bin_pos = trainer.get_bin(new_pos, max_pos, num_bins_pos)
+            bin_vel = trainer.get_bin(new_vel, max_vel, num_bins_vel)
+            bin_ang = trainer.get_bin(new_ang, max_ang, num_bins_ang)
+            action = np.argmax(q_mat[bin_pos][bin_vel][bin_ang])
+            
+            num_bins, direction = trainer.action_to_num_and_dir(action, num_actions)
+            print("\n\npos:", new_pos, bin_pos, "\nvel:", new_vel, bin_vel, "\nang:", new_ang, bin_ang, "\nact:", action, "\nbins:", num_bins, " dir:", direction, "\nq:", q_mat[bin_pos][bin_vel][bin_ang])
+            trainer.do_action(num_bins, direction, draw=True, speed=60)
+            #print(q_mat[bin_pos][bin_vel][bin_ang], action)
+            #for j in range(0, 1):
+            #    trainer.step_simulation(True, True, True, 60)
+            new_pos, new_vel, new_ang = trainer.get_ball_info()
+            #print(i, new_pos, new_vel, new_ang)
+        print("FOT:", trainer.num_frames_off_tray)
+        trainer.remove_ball()
 
 
 
