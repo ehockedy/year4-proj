@@ -15,5 +15,5 @@ elif option == 2:
     wal.do_watch_and_learn_evaluation(trainer, 5)
 elif option == 3:
     trainer = nn.setup_nn()
-    nn.train_nn(trainer, structure=(2, 2))
+    #nn.train_nn(trainer, structure=(2, 2))
     nn.evaluate_nn(trainer, number_of_trials=200, iteration_limit=200, action_threshold=0.2, draw_output=False, draw_speed=1000)
