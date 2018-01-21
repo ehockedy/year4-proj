@@ -239,6 +239,6 @@ class Nao:
 
 # Functions to add:
 # - Rest function
-# - Update angles of joints upon key press
+# - Saved angles of joints upon key press
 # - Get angles and other data saved in config file
 # - Check if lost ball - maybe also with threading

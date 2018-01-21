@@ -15,6 +15,7 @@ import copy
 import time
 
 import configparser
+import json 
 
 config = configparser.ConfigParser()
 config.read('config.ini')
@@ -185,7 +186,7 @@ class BallBalancer:
             print("DIRECTION VALUE IS WRONG IN do_action")
         target_bin = self.a + direction*num_of_angs_to_move  # The bin of the angle we are aiming for
         target_angle = self.MIN_ANGLE + target_bin * (self.MAX_ANGLE - self.MIN_ANGLE)/self.NUM_ANGLE_BINS  # The actual angle we are aiming for NUM_ANGLE_BINS should be changes, probably to a parameter
-        #print(self.a, num_of_angs_to_move, direction, target_angle, self.MIN_ANGLE, self.MAX_ANGLE, self.NUM_ANGLE_BINS)
+        # print(self.a, num_of_angs_to_move, direction, target_angle, self.MIN_ANGLE, self.MAX_ANGLE, self.NUM_ANGLE_BINS)
         if target_bin > self.NUM_ANGLE_BINS:
             target_bin = self.NUM_ANGLE_BINS
         elif target_bin < 0:
@@ -194,9 +195,9 @@ class BallBalancer:
             target_angle = self.MAX_ANGLE
         elif target_angle < self.MIN_ANGLE:
             target_angle = self.MIN_ANGLE
-        #print(self.a, num_of_angs_to_move, direction, target_angle, self.MIN_ANGLE, self.MAX_ANGLE, self.NUM_ANGLE_BINS)
+        # print(self.a, num_of_angs_to_move, direction, target_angle, self.MIN_ANGLE, self.MAX_ANGLE, self.NUM_ANGLE_BINS)
         while turn and self.is_ball_on_tray(self.length_on_tray):
-            #print(self.trayBody.angle, target_angle, self.MIN_ANGLE, target_bin)
+            # print(self.trayBody.angle, target_angle, self.MIN_ANGLE, target_bin)
             if direction == -1:
                 if self.trayBody.angle > target_angle and self.trayBody.angle > self.MIN_ANGLE:  # Keep rotating util we are past the angle we are aiming for
                     self.trayBody.apply_force_at_local_point(Vec2d.unit() * self.rotation, (-self.tray_width/2, 0))  # rotate flipper clockwise
@@ -204,7 +205,7 @@ class BallBalancer:
                     turn = False
                     self.ball.body.velocity[1] = 0
             elif direction == 1:
-                #print(self.NUM_ANGLE_BINS, self.trayBody.angle, target_angle, self.MIN_ANGLE, target_bin)
+                # print(self.NUM_ANGLE_BINS, self.trayBody.angle, target_angle, self.MIN_ANGLE, target_bin)
                 if self.trayBody.angle < target_angle and self.trayBody.angle < self.MAX_ANGLE:
                     self.trayBody.apply_force_at_local_point(Vec2d.unit() * self.rotation, (self.tray_width/2, 0))  # rotate flipper anticlockwise
                 else:
@@ -212,13 +213,10 @@ class BallBalancer:
                     self.ball.body.velocity[1] = 0
             self.step_simulation(slow, record, draw, speed)
         self.a = target_bin
-        #print(self.a)
         self.trayBody.angular_velocity = 0
         self.prev_ball_pos = self.get_pos_ball_along_tray()
         
-    def step_simulation(self, slow_tray=True, record_speed=True, draw=False, draw_speed=60):
-        #self.ball.body.velocity[1] = 0
-       
+    def step_simulation(self, slow_tray=True, record_speed=True, draw=False, draw_speed=60):       
         dt = 1.0/60.0/5.
         for x in range(5):
             self.space.step(dt)
@@ -241,19 +239,16 @@ class BallBalancer:
     def __get_state(self, pos, vel, ang):
         p_bin = math.floor(((pos + (self.tray_width/2)) / (self.tray_width) * self.NUM_X_DIVS))
         v_bin = math.floor(((vel + self.MAX_VELOCITY) / (self.MAX_VELOCITY*2)) * self.NUM_VELOCITIES)
-        a_bin = (math.floor(((ang + np.pi) / (2*np.pi)) * self.NUM_ANGLES + self.NUM_ANGLES//4))%self.NUM_ANGLES #starting from right is 0, then increases going anticlockwise
-        #In terms of normal angles, when horizontal, angle is 0
-        #When going from horizontal and turning anticlockwise angle goes from 0 and increases, with pi at other horizontal
-        #When going clockwise, angle goes below 0 and then decreases
-        #if abs(pos) >= self.tray_width/2:
-            #p_bin = -1
+        a_bin = (math.floor(((ang + np.pi) / (2*np.pi)) * self.NUM_ANGLES + self.NUM_ANGLES//4)) % self.NUM_ANGLES  # starting from right is 0, then increases going anticlockwise
+        # In terms of normal angles, when horizontal, angle is 0
+        # When going from horizontal and turning anticlockwise angle goes from 0 and increases, with pi at other horizontal
+        # When going clockwise, angle goes below 0 and then decreases
+        # if abs(pos) >= self.tray_width/2:
+            # p_bin = -1
         if p_bin > 1:
-            #print("OVER", p_bin)
             p_bin = 1
         elif p_bin < 0:
-            #print("UNDER", p_bin)
             p_bin = 0
-        #print("PBIN", p_bin, pos)
         return p_bin, v_bin, a_bin
 
     def normalised(self, q, actions):
@@ -269,15 +264,15 @@ class BallBalancer:
     def add_ball(self, xdist, vel, angle=0, mass=1, radius=25):
         if angle == 0:
             angle = self.tray_angle
-        inertia = pymunk.moment_for_circle(mass, 0, radius, (0,0))
+        inertia = pymunk.moment_for_circle(mass, 0, radius, (0, 0))
         body = pymunk.Body(1, inertia)
         ang = np.pi/2 - angle - np.arctan2(radius, xdist)  # Right angle - angle of tray - angle from the tray to the line that goes through the centre of the ball
         hyp = np.sqrt(xdist * xdist + radius * radius)  # Dist from centre of tray to centre of ball
         xpos = hyp * np.sin(ang)  # Distance in x direction of ball, from centre of tray
         ypos = hyp * np.cos(ang)
         body.position = self.tray_x_pos + xpos, self.tray_y_pos + ypos + 0.1  # extra 0.1 makes sure does not lie in the tray
-        shape = pymunk.Circle(body, radius, (0,0))
-        shape.elasticity = 0#0.95
+        shape = pymunk.Circle(body, radius, (0, 0))
+        shape.elasticity = 0  # 0.95
         body.velocity = Vec2d(vel, 0)
         self.space.add(body, shape)
         shape.current_velocity = vel
@@ -291,7 +286,7 @@ class BallBalancer:
         shape.angle = angle
         shape.rad = radius
         shape.xdist = xdist
-        shape.mass = 1#0
+        shape.mass = 1
         self.prev_ball_pos = xdist
         self.ball = shape
         self.ball_body = body
@@ -301,9 +296,9 @@ class BallBalancer:
         self.was_positive = False
 
     def get_pos_ball_along_tray(self):
-        #ang = np.pi/2 - self.ball.angle - np.arctan2(self.ball.rad, self.ball.xdist)  # Right angle - angle of tray - angle from the tray to the line that goes through the centre of the ball
-        #hyp = np.sqrt(self.ball.xdist * self.ball.xdist + self.ball.rad * self.ball.rad)  # Dist from centre of tray to centre of ball
-        #xpos = hyp * np.sin(ang) 
+        # ang = np.pi/2 - self.ball.angle - np.arctan2(self.ball.rad, self.ball.xdist)  # Right angle - angle of tray - angle from the tray to the line that goes through the centre of the ball
+        # hyp = np.sqrt(self.ball.xdist * self.ball.xdist + self.ball.rad * self.ball.rad)  # Dist from centre of tray to centre of ball
+        # xpos = hyp * np.sin(ang) 
         x = self.ball.body.position[0] - self.tray_x_pos
         return x / np.cos(self.trayBody.angle)
 
@@ -373,7 +368,7 @@ class BallBalancer:
         val = False
         if len(self.ball.shapes_collide(self.space.shapes[0]).points) > 0:  # If there is contact, return true
             val = True
-            
+
             self.num_frames_off_tray = 0  # Set the counter for number of frames without contact to zero
         elif self.num_frames_off_tray < limit:  # If the number of frames without contact is below the threshold. If false, false will be returned i.e. no longer in contact.
             self.num_frames_off_tray += 1  # increase the counter
@@ -431,7 +426,8 @@ class BallBalancer:
         ang = self.get_bin(ang_val, ang_max, ang_num)
         return pos, vel, ang
 
-num_bins_ang = 4 # number of angles above and below
+
+num_bins_ang = 4  # number of angles above and below
 num_bins_pos = 10
 num_bins_vel = 8
 num_actions = num_bins_ang * 2  # First half is clockwise (-1 dir), second half is anticlockwise (1 dir)
@@ -439,10 +435,10 @@ num_actions = num_bins_ang * 2  # First half is clockwise (-1 dir), second half 
 max_ang = 0.1
 max_pos = 200
 max_vel = 600
-#init_vel_range = 50
 
 q_mat = np.zeros((num_bins_pos, num_bins_vel, num_bins_ang, num_actions))
-#q_mat = np.load("q.npy")
+
+
 def setup_nn(num_pos=10, num_vel=8, num_ang=4):
     trainer = BallBalancer()
     trainer.set_up_pygame()
@@ -461,24 +457,64 @@ def setup_nn(num_pos=10, num_vel=8, num_ang=4):
     trainer.discount_factor = 0
 
     trainer.NUM_ANGLE_BINS = num_bins_ang  # Make it so dont have to do this
+    print(num_bins_pos)
     return trainer
 
+
 training_data = []
+training_data_json = []
 
 train_speed = 60
 
-def generate_data_nn(trainer, append_q=True, save_q=False):
+
+def transfer_data():
+    old_data = list(np.load("training_data_nn.npy"))
+
+    # load_json = open("training_data.json", "r")
+    # loaded_json = json.load(load_json)
+    new_data = []  # loaded_json["data"]
+
+    for i in old_data:
+        new_datum = {"pos": int(i[0]), "vel": int(i[1]), "ang": int(i[2]), "action": int(i[3])}
+        new_data.append(new_datum)
+
+    json_output = open("training_data.json", 'w')
+    json_data = {
+                    "data": new_data,
+                    "matadata": [
+                        {
+                            "num_pos": num_bins_pos, 
+                            "num_vel": num_bins_vel, 
+                            "num_ang": num_bins_ang, 
+                            "max_pos": max_pos, 
+                            "max_vel": max_vel, 
+                            "max_ang": max_ang
+                        }
+                    ]
+    }
+    # loaded_json["data"] = new_data
+    json.dump(json_data, json_output)
+
+
+def generate_data_nn(trainer, append_q=True, save_q=False, pos_range=(-max_pos, max_pos), vel_range=(-max_vel, max_vel)):
     i = 0
     running = True
+    print(num_bins_pos)
 
     if append_q:
-        training_data = np.load("training_data_nn.npy")
+        # training_data = list(np.load("training_data_nn.npy"))
+        load_json = open("training_data.json", "r")
+        # print(load_json)
+        training_data_json = json.load(load_json)["data"]
+        #print(training_data_json)
+    else:
+        training_data_json = []
 
     while i < 100 and trainer.continue_running() and running:
         new_ang = (random.randint(0, max_ang*100)/100) * ((-1)**(random.randint(1,2)))  # Random andgle the tray will be for this test
-        new_pos = random.randint(0, max_pos) * ((-1)**(random.randint(1,2)))  # Random position of the ball on the tray for this test
-        new_vel = random.randint(0, max_vel) * ((-1)**(random.randint(1,2)))  # Random velocity of the ball for this test
-
+        new_pos = int(random.uniform(*pos_range))  # random.randint(0, max_pos) * ((-1)**(random.randint(1,2)))  # Random position of the ball on the tray for this test
+        new_vel = int(random.uniform(*vel_range))  # random.randint(0, max_vel) * ((-1)**(random.randint(1,2)))  # Random velocity of the ball for this test
+        # print(new_pos, new_vel)
         if random.random() < 0.5:  # Get it into a smaller range more often, as these values are seen much more
             new_pos = new_pos // 2.0
             new_vel = new_vel // 2.0 
@@ -486,26 +522,14 @@ def generate_data_nn(trainer, append_q=True, save_q=False):
         trainer.update_tray_angle(new_ang)  # Move the tray to the chosen position
         trainer.add_ball(new_pos, new_vel)  # Add the new ball
         trainer.a = trainer.get_bin(new_ang, max_ang, num_bins_ang)
-        #print("\n\n\n")
+        # print("\n\n\n")
         continue_this_ball = True
         while trainer.is_ball_on_tray() and continue_this_ball:  # See what happens after action has taken place
 
             bin_ang = trainer.get_bin(new_ang, max_ang, num_bins_ang)
             bin_pos = trainer.get_bin(new_pos, max_pos, num_bins_pos)
             bin_vel = trainer.get_bin(new_vel, max_vel, num_bins_vel)
-            
-            # random_action = random.random()
-            # action = np.argmax(q_mat[bin_pos][bin_vel][bin_ang])  # The action to take, the one with biggest value for the chosen pos, vel, ang values
-            # if random_action < random_action_chance:
-            #     action = random.choice(range(0, num_actions))  # Do a random action instead
 
-            # num_bins, direction = trainer.action_to_num_and_dir(action, num_actions)  # Use that value to get the number of angle bins to rotate round, and in what direction
-            # #print("ANG:", new_ang, bin_ang, "  POS:", new_pos, bin_pos, "  VEL:", new_vel, bin_vel, "  BINS:", num_bins, "  DIR:", direction)
-            # #print("ang b4:", trainer.trayBody.angle)
-            # #print("angle", trainer.trayBody.angle, bin_ang, "\naction", action, "\ndir", direction, "\nnum bins", num_bins, "\n\n")
-            # reward = -1
-
-            #TRAIN NN BY USING HUMAN INPUT AS TRAINING EXAMPLE
             not_done_yet = True
             for event in pygame.event.get():
                 if event.type == QUIT:
@@ -527,12 +551,9 @@ def generate_data_nn(trainer, append_q=True, save_q=False):
                         output = -1
                     elif event.key == K_UP:
                         output = 0
-                    data_sample = (inputs[0], inputs[1], inputs[2], output)
-                    training_data.append(data_sample)
-                    #print("input:", inputs)
-                    #print("output:", output)
-                    #print(data_sample, training_data)
-                    not_done_yet = False                    
+                    new_data = {"pos": inputs[0], "vel": inputs[1], "ang": inputs[2], "action": output}  # Format the NN inputs and output into json format
+                    training_data_json.append(new_data)  # Add to the data
+                    not_done_yet = False
             trainer.step_simulation(True, True, True, train_speed)
         trainer.remove_ball()
 
@@ -541,8 +562,23 @@ def generate_data_nn(trainer, append_q=True, save_q=False):
         if i % trainer.reduction_freq == 0:
             trainer.random_action_chance /= trainer.reduction_amount
             print(i)
-    if save_q:
+    if save_q:  # Saves the training data in a json format, with the metadata about the parameters used for training
         np.save("training_data_nn", training_data)
+        json_output = open("training_data.json", 'w')
+        json_data = {
+                        "matadata": [
+                            {
+                                "num_pos": num_bins_pos, 
+                                "num_vel": num_bins_vel, 
+                                "num_ang": num_bins_ang, 
+                                "max_pos": max_pos, 
+                                "max_vel": max_vel, 
+                                "max_ang": max_ang
+                            }
+                        ]
+                        "data": training_data_json,
+        }
+        json.dump(json_data, json_output)
 
 
 
@@ -556,21 +592,25 @@ from pybrain.tools.customxml import NetworkReader
 
 TRAIN_NN = False
 
-def train_nn(trainer, structure=(2), momentum=0.99, learningrate=0.001):
-    training_data = np.load("training_data_nn.npy")
+def train_nn(trainer, structure=(2), momentum=0.99, learningrate=0.001, train_time=200):
+    load_json = open("training_data.json", "r")
+    training_data = json.load(load_json)["data"]
 
     struct = (3,) + structure + (1,)
 
     print(struct)
 
-    net = buildNetwork(*struct, bias=True)
+    net = buildNetwork(*struct, bias=True)  # * converts list tuple into separate parameters
 
     ds = SupervisedDataSet(3, 1)
     for i in training_data:
-        ds.addSample(i[0:3], i[3])
+        inp = [i["pos"], i["vel"], i["ang"]]
+        out = [i["action"]]
+        #print(inp, out)
+        ds.addSample(inp, out)
     #print(ds)
-    train = BackpropTrainer(net, ds, learningrate = 0.001, momentum = 0.99)
-    train.trainEpochs(200)
+    train = BackpropTrainer(net, ds, learningrate=learningrate, momentum=momentum)
+    train.trainEpochs(train_time)
 
     NetworkWriter.writeToFile(net, 'trained_nn.xml')
 
@@ -587,7 +627,7 @@ def get_nn_output(net, inp):
     return action
 
 
-def evaluate_nn(trainer, number_of_trials=10, iteration_limit=200, action_threshold=0.2, draw_output=True, draw_speed=60):
+def evaluate_nn(trainer, number_of_trials=10, iteration_limit=200, action_threshold=0.2, pos_range=(-max_pos, max_pos), vel_range=(-max_vel, max_vel), draw_output=True, draw_speed=60):
     net = NetworkReader.readFrom('trained_nn.xml')
 
     number_completed = 0  # The number of trials in which the ball stays on for the max number of iterations
@@ -595,10 +635,11 @@ def evaluate_nn(trainer, number_of_trials=10, iteration_limit=200, action_thresh
     i = 0
     running = True
     while i < number_of_trials and trainer.continue_running() and running:
-        print(i)
+        if i%100 == 0:
+            print(i)
         new_ang = (random.randint(0, max_ang*100)/100) * ((-1)**(random.randint(1,2)))  # Random andgle the tray will be for this test
-        new_pos = random.randint(0, max_pos) * ((-1)**(random.randint(1,2)))  # Random position of the ball on the tray for this test
-        new_vel = random.randint(0, max_vel) * ((-1)**(random.randint(1,2)))  # Random velocity of the ball for this test
+        new_pos = int(random.uniform(*pos_range))  # random.randint(0, max_pos) * ((-1)**(random.randint(1,2)))  # Random position of the ball on the tray for this test
+        new_vel = int(random.uniform(*vel_range))  # random.randint(0, max_vel) * ((-1)**(random.randint(1,2)))  # Random velocity of the ball for this test
 
         if random.random() < 1:  # Get it into a smaller range more often, as these values are seen much more
             new_vel = new_vel // 2.0 
@@ -617,6 +658,7 @@ def evaluate_nn(trainer, number_of_trials=10, iteration_limit=200, action_thresh
             p, v, a = trainer.get_bin_info(p, max_pos, num_bins_pos, v, max_vel, num_bins_vel, a, max_ang, num_bins_ang)
 
             action = net.activate([p, v, a])
+            #print(action)
             #print(continue_this_ball, action, p, v, a)
             if abs(action) > action_threshold:
                 if action < 0:
