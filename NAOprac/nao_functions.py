@@ -1,21 +1,19 @@
-#import almath
-#import argparse
 from naoqi import ALProxy
-import motion
 import numpy as np
 import time
-import random as rnd
 import copy
 import images2
 import cv2
 import ConfigParser
 import threading
+import math
 from pybrain.tools.customxml import NetworkReader
+from msvcrt import getch
 
 
 def flip_angles(angs, js):
     """
-    Given some andgles and joints, it returnes the angles for the joints on the other side of the body
+    Given some angles and joints, it returns the angles for the joints on the other side of the body
     """
     angs_flipped = copy.copy(angs)
     for j1 in range(0, len(js)):
@@ -34,8 +32,30 @@ def flip_angles(angs, js):
     return angs_flipped
 
 
+def __get_bin(val, max_val, num_val_bins):
+        val_percent = (val+max_val) / (2 * max_val)
+        val_bin = math.floor(val_percent * num_val_bins)
+        if val_bin < 0:
+            val_bin = 0
+        elif val_bin >= num_val_bins:
+            val_bin = num_val_bins-1
+        return val_bin
+
+
+def inputs_to_bins(inputs, input_max, num_bins):
+    """
+    Takes actual values of position, velocity and angle of ball and
+    converts them to a discrete bin vale based on the possible ranges
+    those values can take and the number of discrete bins for each value
+    """
+    pos = __get_bin(inputs[0], input_max[0], num_bins[0])
+    vel = __get_bin(inputs[1], input_max[1], num_bins[1])
+    ang = __get_bin(inputs[2], input_max[2], num_bins[2])
+    return pos, vel, ang
+
+
 def load_network():
-    net = NetworkReader.readFrom('trained_nn.xml')
+    net = NetworkReader.readFrom('nn_trained_networks/trained_nn.xml')
     return net
 
 
@@ -48,7 +68,7 @@ def get_nn_output(net, inp):
 
 class Nao:
     def __init__(self, ip, port=9559):
-        #SET UP THE NAO
+        # SET UP THE NAO
         self.NAO_PORT = port  # 9559
         self.NAO_IP = ip  # "169.254.254.250"
         self.motionProxy = ALProxy("ALMotion", ip, port)
@@ -75,21 +95,38 @@ class Nao:
                        "RShoulderPitch", "RShoulderRoll",
                        "LElbowYaw", "LElbowRoll", "LWristYaw",
                        "RElbowYaw", "RElbowRoll", "RWristYaw"]
-        self.tilt_left = [0.18250393867492676, -0.08748006820678711, 0.6727747321128845, 0.14530789852142334, -1.9174580574035645, -0.5, 0.15029001235961914, 1.735066294670105, 0.9, -0.07674193382263184]#3313021659851074, 7286896109580994#[0.846985399723053, -0.09535059332847595, 0.14883995056152344, 0.07359004020690918, -1.5987539291381836, -0.8236891627311707, -0.25315189361572266, 1.498676061630249, 0.08287787437438965, -0.3237159252166748]
-        self.tilt_right = flip_angles(self.tiltLeft, self.joints)
+
+        # self.tilt_left = [0.18250393867492676, -0.08748006820678711,
+        #                   0.6727747321128845, 0.14530789852142334,
+        #                   -1.9174580574035645, -0.5, 0.15029001235961914,
+        #                   1.735066294670105, 0.9, -0.07674193382263184]
+        self.tilt_left = [0.18250393867492676, -0.15,
+                          0.6727747321128845, 0.17,
+                          -1.7, -0.8, 0.15029001235961914,
+                          1.6, 0.5, -0.1]
+
+        self.tilt_right = flip_angles(self.tilt_left, self.joints)
         self.angle_lr = self.tilt_left  # The current tilt in the left-right axis
         self.angle_lr_interpolation = int(self.num_angles / 2)  # The current tilt position
 
         self.tilt_back = []
         self.tilt_forward = []
-        self.tilt_fb = []
-        self.tilt_fb_interpolation = 0
+        self.angle_fb = []
+        self.angle_fb_interpolation = 0
 
         self.shoulder_roll_joints = ["LShoulderRoll", "RShoulderRoll"]
-        self.shoulder_roll_angles = [-0.1, 0.1]
+        self.shoulder_roll_angles = [-0.8, 0.8]
 
         self.hip_joints = ["LHipYawPitch"]
         self.hip_angles = [0.25]
+
+        # BALL INFORMATION
+        self.ball_pos_lr = 0
+        self.ball_pos_fb = 0
+        self.ball_vel_lr = 0
+        self.ball_vel_fb = 0
+        self.ball_ang_lr = 0
+        self.ball_ang_fb = 0
 
     def initial_setup(self):
         """
@@ -111,11 +148,19 @@ class Nao:
         """
         Reset the nao so that it is in a position to hold the tray
         """
-        speed = 0.5
+        speed = 0.2
         self.postureProxy.goToPosture("StandInit", speed)
+        time.sleep(0.5)
+
         self.motionProxy.setAngles(self.hip_joints, self.hip_angles, speed)  # Make nao lean backwards a bit, helps with keeping tray flat
-        self.motionProxy.setAngles(self.joints, self.starting_angles, speed)
+        time.sleep(0.5)
+
         self.motionProxy.setAngles(self.shoulder_roll_joints, self.shoulder_roll_angles, speed)
+        time.sleep(0.5)
+
+        self.interpolate_angles_fixed_lr(5, 10)  # Set angles to be middle value
+        self.go_to_interpolated_angles_lr(speed=speed)
+        time.sleep(0.5)
 
     def get_q_matrix_from_file(self, q_mat_name):
         """
@@ -127,10 +172,11 @@ class Nao:
 
     def interpolate_angles_fixed_lr(self, interpolation_value, num_interpolations=0):
         """
-        Given the two sets of angles that describe the full left tilt anf full right tilt, 
-        update the angles that describe the position in between, determined by interpolation_value
+        Given the two sets of angles that describe the full left tilt and full
+        right tilt, update the angles that describe the position in between,
+        determined by interpolation_value
         """
-        new_angs = [0 for i in self.tiltLeft]  # Construct empty array
+        new_angs = [0 for i in self.tilt_left]  # Construct empty array
         if num_interpolations == 0:
             num_interpolations = self.num_angles  # Use the value loaded from file by default
         proportion1 = float(interpolation_value) / float(num_interpolations)
@@ -140,21 +186,23 @@ class Nao:
         self.angle_lr = new_angs
         self.angle_lr_interpolation = interpolation_value
 
-    def interpolate_angles_relative_lr(self, interpolation_value_change, num_interpolations=0):
+    def interpolate_angles_relative_lr(self, interpolation_value_change, num_interpolations=0, lower_bound=0, upper_bound=0):
         """
-        Given the two sets of angles that describe the full left tilt anf full right tilt, 
+        Given the two sets of angles that describe the full left tilt and full right tilt, 
         go the angles that describe the position in between, determined by change in interpolation value
         """
         self.angle_lr_interpolation = self.angle_lr_interpolation + interpolation_value_change  # Update the value based on the relaive change of interpolated angle 
         if num_interpolations == 0:
             num_interpolations = self.num_angles  # Use the value loaded from file by default
+        if upper_bound == 0:
+            upper_bound = num_interpolations
 
-        if self.angle_lr_interpolation < 0:  # Make sure new interpolation value is bounded
-            self.angle_lr_interpolation = 0
-        elif self.angle_lr_interpolation > num_interpolations:
-            self.angle_lr_interpolation = num_interpolations
+        if self.angle_lr_interpolation < lower_bound:  # Make sure new interpolation value is bounded
+            self.angle_lr_interpolation = lower_bound
+        elif self.angle_lr_interpolation > upper_bound:
+            self.angle_lr_interpolation = upper_bound
 
-        new_angs = [0 for i in self.tiltLeft]  # Construct empty array
+        new_angs = [0 for i in self.tilt_left]  # Construct empty array
         proportion1 = float(self.angle_lr_interpolation) / float(num_interpolations)
         proportion2 = 1 - proportion1
         for i in range(0, len(new_angs)):
@@ -174,15 +222,27 @@ class Nao:
     def go_to_angles(self, angles, joints, speed=0.5):
         self.motionProxy.setAngles(joints, angles, speed)
 
+    def get_angles(self, joints):
+        return self.motionProxy.getAngles(joints, False)  # False means absolute not relative
+
     def go_to_interpolated_angles_lr(self, speed=1):
         self.motionProxy.setAngles(self.joints, self.angle_lr, speed)
     
     def go_to_interpolated_angles_fb(self, speed=1):
         self.motionProxy.setAngles(self.joints, self.angle_fb, speed)
 
+    def rest(self):
+        self.motionProxy.rest()
+
+    def stand(self, speed=0.2):
+        self.postureProxy.goToPosture("StandInit", speed)
+        self.motionProxy.setAngles(self.hip_joints, self.hip_angles, speed)
+        self.interpolate_angles_fixed_lr(5, 10)  # Set angles to be middle value
+        self.go_to_interpolated_angles_lr(speed=speed)
+
     def show_image(self):
         """
-        Displays an image of what the NAO camera currently sees. 
+        Displays an image of what the NAO camera currently sees.
         Uses functions from the images2.py file
         """
         images = self.camProxy.getImageRemote(self.videoClient)
@@ -190,15 +250,49 @@ class Nao:
         cv2.imshow("image", imgs)
         cv2.waitKey(1)
 
-    def continually_update_ball_information(self):
+    def record_angles(self, countdown=0):
+        """
+        Prints out the angles of all the upper body joints.
+        If the countdown parmeter is 0, then it will wait until enter is
+        pressed before recording otherwise, will count down the specified time
+        """
+        if countdown <= 0:
+            raw_input("Press enter when ready ")
+        else:
+            time.sleep(countdown)
+        angs = self.motionProxy.getAngles(self.joints, False)
+        print(angs)
+
+    def manipulate_limbs(self, move_size=0.1):
+        """
+        Allows for control of each limb via keyboard input
+        """
+        for j in range(0, len(self.joints)):
+            joint = self.joints[j]
+            print joint
+            move_this_joint = True
+            while move_this_joint:
+                move = getch()
+                # print(ord(move))
+                ang = self.get_angles(joint)[0]
+                if move == 'j':
+                    self.go_to_angles(ang + move_size, joint)
+                elif move == 'k':
+                    self.go_to_angles(ang - move_size, joint)
+                elif move == 'l':
+                    move_this_joint = False
+                elif move == ' ':
+                    print self.get_angles(joint)[0]
+
+    def continually_update_ball_information(self, wait_time=0.1):
         """
         Spawns a new thread to keep the position and velocity of the ball updated at all times
         """
-        thread = threading.Thread(target=self.__update_ball_information, args=())
-        thread.daemon = True                            # Daemonize thread
+        thread = threading.Thread(target=self.__update_ball_information, args=([wait_time]))
+        thread.daemon = True  # Daemonize thread
         thread.start()
 
-    def __update_ball_information(self):
+    def __update_ball_information(self, wait_time=0.1):
         """
         The function called by the new thread to keep the ball information updated
         """
@@ -206,7 +300,6 @@ class Nao:
         self.ball_pos_lr = self.tracker.getTargetPosition(0)[1]
         self.ball_pos_fb = self.tracker.getTargetPosition(0)[0]
         # INCLUDE SOME KIND OF WEIGHT TIME
-        time.sleep(0.1)
         while True:
             # Position
             self.ball_pos_lr_prev = self.ball_pos_lr  # Store the old ball positions
@@ -221,6 +314,7 @@ class Nao:
 
             # Time
             self.time_prev = self.time  # Store old time
+            time.sleep(wait_time)
             self.time = time.time()  # Set new time
 
             time_diff = self.time - self.time_prev  # Calculate difference
@@ -238,7 +332,5 @@ class Nao:
 
 
 # Functions to add:
-# - Rest function
-# - Saved angles of joints upon key press
 # - Get angles and other data saved in config file
 # - Check if lost ball - maybe also with threading
