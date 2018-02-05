@@ -22,7 +22,7 @@ config.read('config.ini')
 class BallBalancer:
     def __init__(self, p_bins=8, v_bins=8, a_bins=10):
 
-        self.tray_width = 400
+        self.tray_width = 250
         self.tray_height = 20
         self.tray_x_pos = 300
         self.tray_y_pos = 100
@@ -48,6 +48,7 @@ class BallBalancer:
         self.iterations = 1
 
         self.Q = np.zeros((self.num_bins_pos, self.num_bins_vel, self.num_bins_ang, self.num_actions))
+        self.Q.fill(0.5)
         self.q_freq = np.zeros((self.num_bins_pos, self.num_bins_vel, self.num_bins_ang))
 
         self.reward = 0
@@ -78,6 +79,7 @@ class BallBalancer:
         self.step_size = 10  # When stepping simulation after taking action, to allow time to see what ball does
 
         self.trained = False
+        self.prnt = False
 
         self.run_continuously_with_key_press = True  # Used for testing - whether requires a key input to move to next step of simulation
 
@@ -94,7 +96,7 @@ class BallBalancer:
         self.curr_action = self.__choose_action(self.prev_bin_p, self.prev_bin_v, self.prev_bin_a)
 
         # Remember the ball values before taking any action
-        self.__update_altprev_values()
+        #self.__update_altprev_values()
 
         # Get the new, updated states
         self.curr_bin_p, self.curr_bin_v, self.curr_bin_a = self.__change_state(self.prev_bin_a, self.curr_action)
@@ -103,14 +105,14 @@ class BallBalancer:
         #    print(self.curr_bin_p, self.curr_bin_v)
 
         # Update Q matrix
-        if self.train:
+        if not self.trained:
             if self.curr_bin_p >= 0 and self.curr_bin_v >= 0:
                 reward = self.__calculate_reward()
                 self.reward = reward
                 old_val = copy.copy(self.Q[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a])
-                self.Q[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a][self.curr_action] += \
-                    self.learn_rate * (reward + self.discount_factor * max(self.Q[self.curr_bin_p][self.curr_bin_v][self.curr_bin_a]))
-                self.Q = self.__normalised(self.prev_bin_p, self.prev_bin_v, self.prev_bin_a)
+                self.Q[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a][self.curr_action] = \
+                    ((1-self.learn_rate) * old_val[self.curr_action]) + self.learn_rate * (reward + self.discount_factor * max(self.Q[self.curr_bin_p][self.curr_bin_v][self.curr_bin_a]))
+                self.Q = self.__normalise(self.prev_bin_p, self.prev_bin_v, self.prev_bin_a)
 
                 if prnt:
                     print("\n\nOld:", self.prev_bin_p, self.prev_bin_v, self.prev_bin_a, ", New:", self.curr_bin_p, self.curr_bin_v, self.curr_bin_a,
@@ -226,14 +228,23 @@ class BallBalancer:
         return p_bin, v_bin, a_bin
 
     def __choose_action(self, p_var, v_var, a_var):
-        action = 0
-        if p_var >= 0 and v_var >= 0:
-            if random.random() < self.explore_rate:
-                action = random.randint(0, self.num_actions-1)
-            else:
-                action = np.argmax(self.Q[p_var][v_var][a_var])
-        else:
-            print("BAD")
+        action = random.randint(0, self.num_actions-1)
+        # if p_var >= 0 and v_var >= 0:
+        if random.random() > self.explore_rate:
+            action = np.argmax(self.Q[p_var][v_var][a_var])
+        #         action = random.randint(0, self.num_actions-1)
+        #     else:
+        #         action = np.argmax(self.Q[p_var][v_var][a_var])
+
+        # Select action based on the proportion of weigh that action has
+        #if self.Q[p_var][v_var][a_var][0] > 0 and self.Q[p_var][v_var][a_var][1] > 0:
+        # if random.random() < self.Q[p_var][v_var][a_var][0]:
+        #     action = 0
+        # else:
+        #     action = 1
+        #if random.random() < self.explore_rate:
+        #    action = random.randint(0, self.num_actions-1)
+
         return action
 
     def __change_state(self, a_bin, action):
@@ -245,20 +256,29 @@ class BallBalancer:
         turn = True
         turn_counter = 0
         while turn:
-            if action == 0:
+            if action == 0 and a_bin > 0:
                 if self.trayBody.angle > self.__get_centre_of_ang_bin((a_bin-1)) and self.trayBody.angle > self.min_ang:
                     self.trayBody.apply_force_at_local_point(Vec2d.unit() * self.rotation, (-self.force_distance, 0))  # rotate flipper clockwise
                 else:
                     turn = False
-            elif action == 1:
+            elif action == 1 and a_bin < self.num_bins_ang-1:
                 if self.trayBody.angle < self.__get_centre_of_ang_bin((a_bin+1)) and self.trayBody.angle < self.max_ang:
                     self.trayBody.apply_force_at_local_point(Vec2d.unit() * self.rotation, (self.force_distance, 0))  # rotate flipper anticlockwise
                 else:
                     turn = False
-            elif action == 2:
+            #elif action == 2:
+            else:
                 turn = False  # Do nothing
-                for i in range(0, 5):
-                    self.__step_simulation()
+            #    for i in range(0, 5):
+            #        self.__step_simulation()
+            # else:
+            #     p, v, _ = self.get_state(self.prev_val_p, self.prev_val_v, self.prev_val_a)
+            #     p2, v2, _ = self.get_state(self.curr_val_p, self.curr_val_v, self.curr_val_a)
+            #     if p != p2 or v != v2:
+            #         turn = False
+            #         if action == 2 and self.prnt:
+            #             print("OK", p, p2, v, v2)
+
             turn_counter += 1
             self.__step_simulation()
 
@@ -269,8 +289,8 @@ class BallBalancer:
         #    print("EXTRA", self.iterations)
 
         # Carry out any extra turns
-        for i in range(0, extra):
-            self.__step_simulation()
+        #for i in range(0, extra):
+        #   self.__step_simulation()
 
         ppp, vvv, aaa = self.get_state(self.curr_val_p, self.curr_val_v, self.curr_val_a)
 
@@ -285,13 +305,16 @@ class BallBalancer:
             self.space.step(dt)
 
         # Update the real values
-        self.prev_val_p = self.curr_val_p
-        self.prev_val_v = self.curr_val_v
-        self.prev_val_a = self.curr_val_a
+        self.prev_val_p = copy.copy(self.curr_val_p)
+        self.prev_val_v = copy.copy(self.curr_val_v)
+        self.prev_val_a = copy.copy(self.curr_val_a)
 
         self.curr_val_p = self.__get_ball_pos_x(self.ball)
         self.curr_val_v = self.ball.body.velocity[0]
         self.curr_val_a = self.trayBody.angle
+
+        if self.prnt:
+            self.draw(60)
 
     def __update_altprev_values(self):
         """
@@ -312,84 +335,54 @@ class BallBalancer:
         """
         reward = 0
 
-        # if abs(self.curr_val_p) < (self.max_pos)/5:
-        #     reward += 0.5
-        # elif abs(self.curr_val_p) < (self.max_pos)/3:
-        #     reward += 0.2
-        # elif abs(self.curr_val_p) > (self.max_pos*2)/3:
-        #     reward -= 0.2
-        # elif abs(self.curr_val_p) > (self.max_pos*4)/5:
-        #     reward -= 0.5
+        gap = 0
+        if abs(self.curr_bin_p) >= int((self.num_bins_pos)/2) - gap and abs(self.curr_bin_p) <= int((self.num_bins_pos)/2) + gap:
+            reward += 1
+            #print(self.curr_bin_p, int((self.num_bins_pos)/2))
 
-        #if abs(self.alt_prev_val_v) > 0 and abs(self.curr_val_v) > 0 and abs(self.alt_prev_val_p) > 0 and abs(self.curr_val_p) > 0:
-        # if abs(self.curr_val_p) < abs(self.alt_prev_val_p):  # Closer to centre
-        #     reward += 0.25
-        # else:
-        #     reward -= 0.25
+        if abs(self.curr_bin_v) >= int((self.num_bins_vel)/2) - gap and abs(self.curr_bin_v) <= int((self.num_bins_vel)/2) + gap:
+            reward += 0.5
 
-        # if (self.alt_prev_val_v > 0 and self.curr_val_v > 0) or (self.alt_prev_val_v < 0 and self.curr_val_v < 0):  # if going in same direction
-        #     if abs(self.alt_prev_val_v) > abs(self.curr_val_v):  # If slowed down
-        #         reward += 0.5
-        #     else:
-        #         reward -= 0.25
-        # else:
-        #     reward += 0.25
+        if abs(self.curr_val_p) > self.max_pos:
+            reward = -1
+            #print(self.curr_bin_v, int((self.num_bins_vel)/2))
 
-        reward = 0.5
-        if self.curr_val_a > 0:
-            if self.curr_val_v < 0:
-                if self.curr_val_p < self.max_pos/2:
-                    reward = -0.5
-        elif self.curr_val_a < 0:
-            if self.curr_val_v > 0:
-                if self.curr_val_p > -self.max_pos/2:
-                    reward = -0.5
+        #if abs(self.curr_bin_a) == int((self.num_bins_ang)/2):
+        #    reward += 0.1
 
-
-        # mid_bin = int(self.num_bins_pos/2)
-
-        # if abs(self.curr_bin_p) < mid_bin + int(self.num_bins_pos/6) and abs(self.curr_bin_p) > mid_bin - int(self.num_bins_pos/6):
-        #     reward += 0.5
-        # elif abs(self.curr_bin_p) < mid_bin + int(self.num_bins_pos/4) and abs(self.curr_bin_p) > mid_bin - int(self.num_bins_pos/4):
-        #     reward += 0.2
-        # elif abs(self.curr_bin_p) < mid_bin + int(self.num_bins_pos/1.5) and abs(self.curr_bin_p) > mid_bin - int(self.num_bins_pos/1.5):
-        #     reward -= 0.2
-        # elif abs(self.curr_bin_p) < mid_bin + int(self.num_bins_pos/1.2) and abs(self.curr_bin_p) > mid_bin - int(self.num_bins_pos/1.2):
-        #     reward -= 0.5
-        # else:
-        #     reward -= 0.8
-
-        #reward = ( (1 - abs(self.curr_val_p) / self.max_pos) - 0.5) * 2
-
-        # if abs(self.alt_prev_val_v) > 0 and abs(self.curr_val_v) > 0:
-        #     if int(self.alt_prev_val_v/abs(self.alt_prev_val_v)) == int(self.curr_val_v/abs(self.curr_val_v)):  # if going in same direction
-        #         if abs(self.alt_prev_val_v) > abs(self.curr_val_v):  # If slowed down
-        #             reward += 0.5
-        #         #elif abs(self.curr_val_p) < (self.max_pos)/3:  # Speeding up through center is bad, so nullify the positive centre score
-        #         #    reward -= 1.0
-        #         else:
-        #             reward -= 0.5
+        #print(reward)
         #else:
-        #    print(self.iterations)
-            #else:
-            #    reward += 0.4  # Change of direction is good
+        #    reward = -1
 
-        #if abs(self.curr_val_v) < abs(self.max_vel) / 10:
-        #    reward += 0.5
-        #elif abs(self.curr_val_v) > abs(self.max_vel*3) / 5:
-        #    reward -= 0.5
 
-        #if abs(self.curr_val_a) < abs(self.max_ang) / 20:
-        #    reward += 0.2
-        
-        #reward += (1 - abs(self.curr_val_p) / self.max_pos) * 2 - 1
-        #reward += (1 - (abs(self.curr_val_v)*2) / self.max_vel) * 2 - 1
-        
+        # reward = 0.5
+        # if self.curr_val_a > 0:
+        #     if self.curr_val_v < 0:
+        #         if self.curr_val_p < self.max_pos/2:
+        #             reward = -0.5
+        # elif self.curr_val_a < 0:
+        #     if self.curr_val_v > 0:
+        #         if self.curr_val_p > -self.max_pos/2:
+        #             reward = -0.5
+
         return reward
 
-    def __normalised(self, p_var, v_var, a_var):
+    def __normalise(self, p_var, v_var, a_var):
         """
         Maps all values to between -1 and 1
+        """
+        q_var = copy.copy(self.Q)
+        sumup = 0
+        for i in q_var[p_var][v_var][a_var]:
+            sumup += abs(i)
+        if sumup > 0:
+            for i in range(0, len(self.Q[p_var][v_var][a_var])):
+                q_var[p_var][v_var][a_var][i] = (self.Q[p_var][v_var][a_var][i]/sumup)
+        return q_var
+
+    def __normalise_one_zero(self, p_var, v_var, a_var):
+        """
+        Maps all values to between 0 and 1
         """
         q_var = copy.copy(self.Q)
         sumup = 0
@@ -442,7 +435,7 @@ class BallBalancer:
         elif b > self.num_bins_ang - 1:
             b = self.num_bins_ang - 1
         jump = (self.max_ang * 2.0) / self.num_bins_ang  # Size of a bin
-        bin_pos = (b + 0.5) % self.num_bins_ang  # The bth bin, and then half way through that
+        bin_pos = (b + 0.5)  # % self.num_bins_ang  # The bth bin, and then half way through that
         centre_angle = self.min_ang + jump * bin_pos
         return centre_angle
 
@@ -543,14 +536,14 @@ def setup_q_trainer(p, v, a):
     trainer = BallBalancer(p, v, a)
     trainer.set_up_pygame()
     trainer.create_world()
-    trainer.max_draw_iterations = 4000
+    trainer.max_draw_iterations = 20000
     if OBSERVE:
         trainer.max_draw_iterations = 0
-    trainer.explore_rate = 1
-    trainer.explore_reduction_freq = 750
-    trainer.scale_reduction = 3
+    trainer.explore_rate = 0.25
+    trainer.explore_reduction_freq = 2500
+    trainer.scale_reduction = 1.3
     trainer.step_size = 1
-    trainer.learn_rate = 0.9
+    trainer.learn_rate = 0.6
     trainer.discount_factor = 0.99
     return trainer
 
@@ -565,15 +558,16 @@ def do_q_learning(trainer, train=True):
     current_run = 0
     max_run_len = 200
     while running:
-        trainer.perform_episode(prnt=training_show)
+        trainer.perform_episode(prnt=False)
 
         if trainer.iterations == trainer.max_draw_iterations:
             trainer.step_size = 1
             trainer.explore_rate = 0
             trainer.reset_draw()
-            trainer.trained = True
+            trainer.prnt = True
+            #trainer.trained = True
         if trainer.iterations > trainer.max_draw_iterations:
-            trainer.draw(10)
+            #trainer.draw(10)
             a, b, c = trainer.get_ball_info_bins()
             #if c == 0 or c == 11:
             print("Q:", a, b, c, ",", trainer.curr_action, trainer.reward, ",", str(round(trainer.curr_val_p,2)), str(round(trainer.curr_val_v, 2)), str(round(trainer.curr_val_a, 2)), trainer.Q[a, b, c])#, trainer.get_state(trainer.prev_val_p, trainer.prev_val_v, trainer.prev_val_a))##trainer.get_ball_info(), trainer.explore_rate)
