@@ -54,9 +54,98 @@ def inputs_to_bins(inputs, input_max, num_bins):
     return pos, vel, ang
 
 
+def get_reward(p, v, np, nv):
+    """
+    Gets the reward based on the given state
+    """
+    reward = 0
+
+    pos_gap = 1
+    # If near center, give big reward
+    if abs(p) >= int((np)/2) - pos_gap and abs(p) <= int((np)/2) + pos_gap:
+        reward += 1
+
+    vel_gap = 1
+    # If low velocity, give medium reward
+    if abs(v) >= int((nv)/2) - vel_gap and abs(v) <= int((nv)/2) + vel_gap:
+        reward += 0.5
+
+    # If it is by the edge areas, give a big punishment
+    edge_gap = 2
+    if p > np - edge_gap or p < 0 + edge_gap:
+        reward = -1
+
+    return reward
+
+
+def update_q(q, prev_state, curr_state, action, reward, learn_rate=0.5, discount_factor=0.99):
+    """
+    Update the Q matrix
+    """
+    # The old state
+    p = prev_state[0]
+    v = prev_state[1]
+    a = prev_state[2]
+    old_val = copy.copy(q[p][v][a])
+
+    # The new state
+    p2 = curr_state[0]
+    v2 = curr_state[1]
+    a2 = curr_state[2]
+
+    # Update and normalise
+    q[p][v][a][action] = ((1-learn_rate) * old_val[action]) + learn_rate * (reward + discount_factor * max(q[p2][v2][a2]))
+    q[p][v][a] = __normalise(q[p][v][a], p, v, a)
+    print(old_val, q[p][v][a], __normalise(q[p][v][a], p, v, a), (reward + discount_factor * max(q[p2][v2][a2])))
+    return q
+
+
+def __normalise(q, p_var, v_var, a_var):
+    """
+    Maps all values to between -1 and 1
+    """
+    q_var = copy.copy(q)
+    sumup = 0
+    for i in q_var:
+        sumup += abs(i)
+    if sumup > 0:
+        for i in range(0, len(q)):
+            q_var[i] = (q[i]/sumup)
+    return q_var
+
+
 def load_network():
     net = NetworkReader.readFrom('nn_trained_networks/trained_nn.xml')
     return net
+
+
+def load_q_matrix(p, v, a, is_nao=False):
+    extra = ""
+    if is_nao:
+        extra = "nao_"
+    data_from_file = np.load("q_mats/q_" + extra + str(p) + "_" + str(v) + "_" + str(a) + ".npz")
+    q_mat = data_from_file["q"]
+    print(q_mat)
+    return q_mat
+
+
+def save_q(q, p, v, a):
+    """
+    Saves the Q matrix as a zipped NumPy binary file
+    Also includes an array called "metadata" with information on the Q
+    matrix
+    """
+    # metadata = {
+    #                 "num_pos": self.num_bins_pos,
+    #                 "num_vel": self.num_bins_vel,
+    #                 "num_ang": self.num_bins_ang,
+    #                 "num_actions": self.num_actions,
+    #                 "max_pos": self.max_pos,
+    #                 "max_vel": self.max_vel,
+    #                 "max_ang": self.max_ang
+    #             }
+
+    np.savez("q_mats/q_nao_" + str(p) + "_" + str(v) + "_" + str(a) + ".npz", q=q)
 
 
 #  net - the neural network, can load with load_network()
@@ -86,9 +175,6 @@ class Nao:
 
         config = ConfigParser.ConfigParser()
         config.read('config.ini')
-        self.min_angle = float(config.get("nao_params", "right_angle_max"))
-        self.max_angle = float(config.get("nao_params", "left_angle_max"))
-        self.num_angles = float(config.get("nao_params", "num_angles"))
 
         # JOINTS AND ANGLES
         self.joints = ["LShoulderPitch", "LShoulderRoll",
@@ -104,6 +190,10 @@ class Nao:
                           0.6727747321128845, 0.17,
                           -1.7, -0.8, 0.15029001235961914,
                           1.6, 0.5, -0.1]
+
+        # self.min_angle = float(config.get("nao_params", "right_angle_max"))
+        # self.max_angle = float(config.get("nao_params", "left_angle_max"))
+        self.num_angles = 15 #CHANGE THIS SO UPDATES# float(config.get("nao_params", "num_angles"))
 
         self.tilt_right = flip_angles(self.tilt_left, self.joints)
         self.angle_lr = self.tilt_left  # The current tilt in the left-right axis
@@ -188,14 +278,14 @@ class Nao:
 
     def interpolate_angles_relative_lr(self, interpolation_value_change, num_interpolations=0, lower_bound=0, upper_bound=0):
         """
-        Given the two sets of angles that describe the full left tilt and full right tilt, 
+        Given the two sets of angles that describe the full left tilt and full right tilt,
         go the angles that describe the position in between, determined by change in interpolation value
         """
-        self.angle_lr_interpolation = self.angle_lr_interpolation + interpolation_value_change  # Update the value based on the relaive change of interpolated angle 
+        self.angle_lr_interpolation = self.angle_lr_interpolation + interpolation_value_change  # Update the value based on the relaive change of interpolated angle
         if num_interpolations == 0:
             num_interpolations = self.num_angles  # Use the value loaded from file by default
         if upper_bound == 0:
-            upper_bound = num_interpolations
+            upper_bound = num_interpolations - 1
 
         if self.angle_lr_interpolation < lower_bound:  # Make sure new interpolation value is bounded
             self.angle_lr_interpolation = lower_bound
@@ -227,7 +317,7 @@ class Nao:
 
     def go_to_interpolated_angles_lr(self, speed=1):
         self.motionProxy.setAngles(self.joints, self.angle_lr, speed)
-    
+
     def go_to_interpolated_angles_fb(self, speed=1):
         self.motionProxy.setAngles(self.joints, self.angle_fb, speed)
 
@@ -262,6 +352,16 @@ class Nao:
             time.sleep(countdown)
         angs = self.motionProxy.getAngles(self.joints, False)
         print(angs)
+
+    def get_tray_angle(self):
+        """
+        Returns the angles between the hands, based on their position
+        in 3D space
+        """
+        xl, yl, _, _, _, _ = self.motionProxy.getPosition("LHand", 2, True)
+        xr, yr, _, _, _, _ = self.motionProxy.getPosition("RHand", 2, True)
+        angle = np.arctan((xl-xr)/(yl-yr))
+        return angle
 
     def manipulate_limbs(self, move_size=0.1):
         """
@@ -327,10 +427,11 @@ class Nao:
             self.ball_vel_fb = pos_fb_diff / time_diff
 
             # Angle
-            self.ball_ang_lr = self.angle_lr_interpolation
-            self.ball_ang_fb = self.angle_fb_interpolation
+            self.ball_ang_lr = self.angle_lr_interpolation  # self.get_tray_angle()
+            self.ball_ang_fb = self.angle_fb_interpolation  # UPDATE WHEN FB WORKING
 
 
 # Functions to add:
 # - Get angles and other data saved in config file
 # - Check if lost ball - maybe also with threading
+# - Change loading q matrix so that it applies the metadata to nao
