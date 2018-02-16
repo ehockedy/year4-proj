@@ -25,52 +25,16 @@ from pybrain.tools.customxml import NetworkReader
 config = configparser.ConfigParser()
 config.read('config.ini')
 
-# pygame.init()
-# screen = pygame.display.set_mode((600, 600))
-# clock = pygame.time.Clock()
-# running = True
-
-# ### Physics stuff
-# space = pymunk.Space()
-# #space.gravity = (0.0, -900.0)
-# space._set_gravity(Vec2d(0, -981))
-# #space.gravity = (0.0, 0.0)
-# draw_options = pymunk.pygame_util.DrawOptions(screen)
-
-# w = 400
-# h = 20
-# fp = [(w/2,-h/2), (-w/2, h/2), (w/2, h/2), (-w/2, -h/2)]
-# mass = 100
-# moment = pymunk.moment_for_poly(mass, fp[0:2])
-
-# x_pos = 300
-# y_pos = 100
-# angle = np.pi/24
-
-
-# trayBody = pymunk.Body(mass, moment)
-# trayBody.position = x_pos, y_pos
-# trayBody.angle = angle
-# trayShape = pymunk.Poly(trayBody, fp)
-# space.add(trayBody, trayShape)
-
-# trayJointBody = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
-# trayJointBody.position = trayBody.position
-# j = pymunk.PinJoint(trayBody, trayJointBody, (0, 0), (0, 0))
-# space.add(j)
-
-# reset = False
-# addBall = False
 
 class BallBalancer:
     def __init__(self):
 
-        self.tray_width = 400
+        self.tray_width = 250
         self.tray_height = 0.001
         self.tray_x_pos = 300
         self.tray_y_pos = 100
         self.tray_angle = -0.05  # np.pi / 24
-        self.rotation = 600000
+        self.rotation = 50000
 
         self.ball_radius = 25
 
@@ -359,18 +323,31 @@ class BallBalancer:
         ang = self.get_bin(ang_val, ang_max, ang_num)
         return pos, vel, ang
 
+    def calculate_reward(self, p, p_max, v, v_max):
+        reward = 0
 
-num_bins_ang = 4  # number of angles above and below
-num_bins_pos = 10
-num_bins_vel = 8
-num_actions = num_bins_ang * 2  # First half is clockwise (-1 dir), second half is anticlockwise (1 dir)
+        p_gap = 0
+        v_gap = 0
+        if p_max % 2 == 0:
+            p_gap = 1
+        if v_max % 2 == 0:
+            v_gap = 1
+
+        if p >= int(p_max/2) - p_gap and p <= int(p_max/2):
+            if v >= int(v_max/2) - v_gap and v <= int(v_max/2):
+                reward = 1
+        else:
+            reward = -1
+
+        return reward
+
 
 max_ang = 0.1
-max_pos = 200
+max_pos = 125
 max_vel = 600
 
 
-def setup_nn(num_pos=10, num_vel=8, num_ang=10, max_pos=200, max_vel=600, max_ang=0.1):
+def setup_nn(num_pos=10, num_vel=8, num_ang=10, max_pos=125, max_vel=600, max_ang=0.1):
     trainer = BallBalancer()
     trainer.set_up_pygame()
     trainer.create_world()
@@ -396,39 +373,6 @@ training_data = []
 training_data_json = []
 
 train_speed = 60
-
-
-def __transfer_data():
-    """
-    Transfer data from old numpy array format to new json format
-    DEPRECATED
-    """
-    old_data = list(np.load("training_data_nn.npy"))
-
-    # load_json = open("training_data.json", "r")
-    # loaded_json = json.load(load_json)
-    new_data = []  # loaded_json["data"]
-
-    for i in old_data:
-        new_datum = {"pos": int(i[0]), "vel": int(i[1]), "ang": int(i[2]), "action": int(i[3])}
-        new_data.append(new_datum)
-
-    json_output = open("training_data.json", 'w')
-    json_data = {
-                    "data": new_data,
-                    "metadata": [
-                        {
-                            "num_pos": num_bins_pos,
-                            "num_vel": num_bins_vel,
-                            "num_ang": num_bins_ang,
-                            "max_pos": max_pos,
-                            "max_vel": max_vel,
-                            "max_ang": max_ang
-                        }
-                    ]
-    }
-    # loaded_json["data"] = new_data
-    json.dump(json_data, json_output)
 
 
 def generate_data_nn(trainer, append_q=True, save_q=False, pos_range=(-max_pos, max_pos), vel_range=(-max_vel, max_vel)):
@@ -544,6 +488,11 @@ def load_network():
     return net
 
 
+def load_q_network():
+    net = NetworkReader.readFrom('nn_trained_networks/q_learnt_nn.xml')
+    return net
+
+
 #  net - the neural network, can load with load_network()
 #  inp - the [position, velocity, angle] bin values
 def get_nn_output(net, inp):
@@ -551,10 +500,23 @@ def get_nn_output(net, inp):
     return action
 
 
+def update_nn(net, inputs, outputs, learningrate=0.001, momentum=0.99):
+    ds = SupervisedDataSet(3, 3)
+    ds.addSample(list(inputs), outputs)
+
+    train = BackpropTrainer(net, ds, learningrate=learningrate, momentum=momentum)
+    train.trainOnDataset(ds)
+    return net
+
+
 def evaluate_nn(trainer, number_of_trials=10, iteration_limit=200, action_threshold=0.2,
                 pos_range=(-max_pos, max_pos), vel_range=(-max_vel, max_vel),
-                draw_output=True, draw_speed=60):
-    net = NetworkReader.readFrom('nn_trained_networks/trained_nn.xml')
+                learn_rate=0.4, discount_factor=0.99,
+                explore_rate=0.5, explore_rate_reduction=2, explore_rate_freq=50,
+                draw_output=True, draw_speed=60, train=True, prnt=False, net=None):
+
+    if net is None:
+        net = NetworkReader.readFrom('nn_trained_networks/trained_nn.xml')
 
     number_completed = 0  # The number of trials in which the ball stays on for the max number of iterations
 
@@ -563,8 +525,9 @@ def evaluate_nn(trainer, number_of_trials=10, iteration_limit=200, action_thresh
     i = 0
     running = True
     while i < number_of_trials and trainer.continue_running() and running:
-        if i % 100 == 0:
+        if i % explore_rate_freq == 0:
             print(i)
+            explore_rate /= explore_rate_reduction
         new_ang = (random.randint(0, trainer.max_ang*100)/100) * ((-1)**(random.randint(1,2)))  # Random andgle the tray will be for this test
         new_pos = int(random.uniform(*pos_range))  # random.randint(0, max_pos) * ((-1)**(random.randint(1,2)))  # Random position of the ball on the tray for this test
         new_vel = int(random.uniform(*vel_range))  # random.randint(0, max_vel) * ((-1)**(random.randint(1,2)))  # Random velocity of the ball for this test
@@ -579,20 +542,57 @@ def evaluate_nn(trainer, number_of_trials=10, iteration_limit=200, action_thresh
         continue_this_ball = 0
         limit = iteration_limit
         while trainer.is_ball_on_tray() and continue_this_ball < limit and running:  # See what happens after action has taken place
+            # Get initial state s
             p, v, a = trainer.get_ball_info()
             p, v, a = trainer.get_bin_info(p, trainer.max_pos, trainer.num_bins_pos, v, trainer.max_vel, trainer.num_bins_vel, a, trainer.max_ang, trainer.num_bins_ang)
 
+            # Use NN to pick and execute best action
             nn_out = net.activate([p, v, a])
             action = np.argmax(nn_out)
+
+            if train:
+                if random.random() < explore_rate:
+                    action = random.randint(0, 2)
+
             # print(p, v, a, nn_out, action)
-            if abs(nn_out[action]) < 0.4:
-                trainer.step_simulation(True, True, draw_output, draw_speed)
+            if abs(nn_out[action]) < action_threshold:
+                trainer.step_simulation(False, True, draw_output, draw_speed)
             elif action == 0:
-                trainer.do_action(1, 1, slow=True, draw=draw_output, speed=draw_speed)
+                trainer.do_action(1, 1, slow=False, draw=draw_output, speed=draw_speed)
             elif action == 2:
-                trainer.do_action(1, -1, slow=True, draw=draw_output, speed=draw_speed)
+                trainer.do_action(1, -1, slow=False, draw=draw_output, speed=draw_speed)
             elif action == 1:
-                trainer.do_action(1, 0, slow=True, draw=draw_output, speed=draw_speed)
+                trainer.step_simulation(False, True, draw_output, draw_speed)
+            #    trainer.do_action(1, 0, slow=True, draw=draw_output, speed=draw_speed)
+
+            if not train and prnt:
+                print(p, v, a, nn_out, action)
+
+            if train:
+                # Get new state s'
+                p2, v2, a2 = trainer.get_ball_info()
+                p2, v2, a2 = trainer.get_bin_info(p2, trainer.max_pos, trainer.num_bins_pos, v2, trainer.max_vel, trainer.num_bins_vel, a2, trainer.max_ang, trainer.num_bins_ang)
+
+                # Calculate reward for being in s'
+                reward = trainer.calculate_reward(p2, trainer.num_bins_pos, v2, trainer.num_bins_vel)
+
+                # Get the value of the best action from the new state
+                action2_val = max(net.activate([p2, v2, a2]))
+
+                if prnt:
+                    print(p, v, a, "/", action, "/", p2, v2, a2, "/", reward)
+                    print(nn_out)
+
+                # Update the output vector values
+                nn_out[action] = ((1 - learn_rate) * nn_out[action]) + (learn_rate * (reward + discount_factor*action2_val))
+
+                if prnt:
+                    print(nn_out, "\n")
+
+                # update the network
+                #print("updating")
+                net = update_nn(net, [p, v, a], nn_out)
+                #print("finished")
 
             continue_this_ball += 1
 
@@ -604,8 +604,11 @@ def evaluate_nn(trainer, number_of_trials=10, iteration_limit=200, action_thresh
 
             if continue_this_ball == limit:
                 number_completed += 1
+
         trainer.remove_ball()
 
         i += 1
 
     print(number_completed/number_of_trials)
+    if train:
+        NetworkWriter.writeToFile(net, 'nn_trained_networks/q_learnt_nn.xml')

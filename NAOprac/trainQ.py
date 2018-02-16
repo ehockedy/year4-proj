@@ -19,6 +19,23 @@ config = configparser.ConfigParser()
 config.read('config.ini')
 
 
+def normalise_whole_q(q):
+    """
+    Normalises the whole q matrix
+    """
+    q_copy = copy.copy(q)
+    for p in range(0, len(q)):
+        for v in range(0, len(q[p])):
+            for a in range(0, len(q[p][v])):
+                sumup = 0
+                for action in range(0, len(q[p][v][a])):
+                    sumup += abs(q[p][v][a][action])
+                if sumup > 0:
+                    for action in range(0, len(q[p][v][a])):
+                        q_copy[p][v][a][action] = q[p][v][a][action] / sumup
+    return q_copy
+
+
 class BallBalancer:
     def __init__(self, p_bins=8, v_bins=8, a_bins=10):
 
@@ -43,12 +60,13 @@ class BallBalancer:
         self.max_ang = float(config["nao_params"]["left_angle_max"])
         self.min_ang = float(config["nao_params"]["right_angle_max"])
 
-        self.file_location = "q_mats/q_" + str(self.num_bins_pos) + "_" + str(self.num_bins_vel) + "_" + str(self.num_bins_ang)
+        self.file_location = "q_mats/q_" + str(self.num_bins_pos) + "_" + str(self.num_bins_vel) + "_" + str(self.num_bins_ang) + "_" + str(self.num_actions)
+        self.file_location_delay = "q_mats/q_DELAY_" + str(self.num_bins_pos) + "_" + str(self.num_bins_vel) + "_" + str(self.num_bins_ang) + "_" + str(self.num_actions)
 
         self.iterations = 1
 
         self.Q = np.zeros((self.num_bins_pos, self.num_bins_vel, self.num_bins_ang, self.num_actions))
-        self.Q.fill(0.5)
+        #self.Q.fill(0.5)
         self.q_freq = np.zeros((self.num_bins_pos, self.num_bins_vel, self.num_bins_ang))
 
         self.reward = 0
@@ -106,15 +124,15 @@ class BallBalancer:
 
         # Update Q matrix
         if not self.trained:
-            if self.curr_bin_p >= 0 and self.curr_bin_v >= 0:
+            if self.curr_bin_p >= 0 and self.curr_bin_v >= 0 and (self.curr_bin_p, self.curr_bin_v, self.curr_bin_a) != (self.prev_bin_p, self.prev_bin_v, self.prev_bin_a):
                 reward = self.__calculate_reward()
                 self.reward = reward
                 old_val = copy.copy(self.Q[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a])
                 self.Q[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a][self.curr_action] = \
                     ((1-self.learn_rate) * old_val[self.curr_action]) + self.learn_rate * (reward + self.discount_factor * max(self.Q[self.curr_bin_p][self.curr_bin_v][self.curr_bin_a]))
-                self.Q = self.__normalise(self.prev_bin_p, self.prev_bin_v, self.prev_bin_a)
+                #self.Q = self.__normalise(self.prev_bin_p, self.prev_bin_v, self.prev_bin_a)
 
-                if prnt:
+                if self.prnt:
                     print("\n\nOld:", self.prev_bin_p, self.prev_bin_v, self.prev_bin_a, ", New:", self.curr_bin_p, self.curr_bin_v, self.curr_bin_a,
                           "\nAction:", self.curr_action, ", Reward:", reward, ", Extra:", self.learn_rate * (reward + self.discount_factor * max(self.Q[self.curr_bin_p][self.curr_bin_v][self.curr_bin_a])),
                           "\nQ_old:", old_val, ", Q_new:", self.Q[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a], ", Q_future:", self.Q[self.curr_bin_p][self.curr_bin_v][self.curr_bin_a])
@@ -232,6 +250,7 @@ class BallBalancer:
         # if p_var >= 0 and v_var >= 0:
         if random.random() > self.explore_rate:
             action = np.argmax(self.Q[p_var][v_var][a_var])
+            #print("NOT RANDOM", self.Q[p_var][v_var][a_var], action)
         #         action = random.randint(0, self.num_actions-1)
         #     else:
         #         action = np.argmax(self.Q[p_var][v_var][a_var])
@@ -253,6 +272,9 @@ class BallBalancer:
         specified
         """
         extra = self.step_size
+        # Carry out any extra turns
+        for i in range(0, extra):
+            self.__step_simulation()
         turn = True
         turn_counter = 0
         while turn:
@@ -283,14 +305,6 @@ class BallBalancer:
             self.__step_simulation()
 
         self.trayBody.angular_velocity = 0  # To stop turning once turn has occured
-
-        #if turn_counter < 2:  # This stops the slow down when at max angle and not changing state
-        #    extra = 10
-        #    print("EXTRA", self.iterations)
-
-        # Carry out any extra turns
-        #for i in range(0, extra):
-        #   self.__step_simulation()
 
         ppp, vvv, aaa = self.get_state(self.curr_val_p, self.curr_val_v, self.curr_val_a)
 
@@ -335,35 +349,17 @@ class BallBalancer:
         """
         reward = 0
 
+        gap_left = 0
+        if self.num_bins_pos % 2 == 0:
+            gap_left = 1
         gap = 0
-        if abs(self.curr_bin_p) >= int((self.num_bins_pos)/2) - gap and abs(self.curr_bin_p) <= int((self.num_bins_pos)/2) + gap:
-            reward += 1
-            #print(self.curr_bin_p, int((self.num_bins_pos)/2))
-
-        if abs(self.curr_bin_v) >= int((self.num_bins_vel)/2) - gap and abs(self.curr_bin_v) <= int((self.num_bins_vel)/2) + gap:
-            reward += 0.5
-
-        if abs(self.curr_val_p) > self.max_pos:
-            reward = -1
-            #print(self.curr_bin_v, int((self.num_bins_vel)/2))
-
-        #if abs(self.curr_bin_a) == int((self.num_bins_ang)/2):
-        #    reward += 0.1
-
-        #print(reward)
-        #else:
-        #    reward = -1
-
-
-        # reward = 0.5
-        # if self.curr_val_a > 0:
-        #     if self.curr_val_v < 0:
-        #         if self.curr_val_p < self.max_pos/2:
-        #             reward = -0.5
-        # elif self.curr_val_a < 0:
-        #     if self.curr_val_v > 0:
-        #         if self.curr_val_p > -self.max_pos/2:
-        #             reward = -0.5
+        if self.curr_bin_p >= int((self.num_bins_pos)/2) - gap - gap_left and self.curr_bin_p <= int((self.num_bins_pos)/2) + gap:
+            if self.curr_bin_v >= int((self.num_bins_vel)/2) - gap - gap_left and self.curr_bin_v <= int((self.num_bins_vel)/2) + gap:
+                reward = 1
+            else:
+                reward = -0.5
+        else:
+            reward = -0.5
 
         return reward
 
@@ -375,22 +371,12 @@ class BallBalancer:
         sumup = 0
         for i in q_var[p_var][v_var][a_var]:
             sumup += abs(i)
+        # print(q_var[p_var][v_var][a_var])
         if sumup > 0:
             for i in range(0, len(self.Q[p_var][v_var][a_var])):
-                q_var[p_var][v_var][a_var][i] = (self.Q[p_var][v_var][a_var][i]/sumup)
-        return q_var
-
-    def __normalise_one_zero(self, p_var, v_var, a_var):
-        """
-        Maps all values to between 0 and 1
-        """
-        q_var = copy.copy(self.Q)
-        sumup = 0
-        for i in q_var[p_var][v_var][a_var]:
-            sumup += abs(i)
-        if sumup > 0:
-            for i in range(0, len(self.Q[p_var][v_var][a_var])):
-                q_var[p_var][v_var][a_var][i] = (self.Q[p_var][v_var][a_var][i]/sumup)
+                q_var[p_var][v_var][a_var][i] = 2 * (abs(self.Q[p_var][v_var][a_var][i])/sumup) - 1
+                # print(2 * (abs(self.Q[p_var][v_var][a_var][i])/sumup) - 1)
+        # print(q_var[p_var][v_var][a_var], sumup, "\n\n")
         return q_var
 
     def __add_ball(self):
@@ -405,9 +391,9 @@ class BallBalancer:
         self.prev_val_v = random.random() * (self.max_vel/2) * (-1 ** random.randint(1, 2))
         self.prev_val_a = self.trayBody.angle
 
-        self.curr_val_p = 0
-        self.curr_val_v = 0
-        self.curr_val_a = 0
+        self.curr_val_p = 0  # body.position[0]
+        self.curr_val_v = 0  # random.random() * (self.max_vel/2) * (-1 ** random.randint(1, 2))
+        self.curr_val_a = 0  # self.trayBody.angle
 
         self.alt_prev_val_p = 0
         self.alt_prev_val_v = 0
@@ -484,12 +470,17 @@ class BallBalancer:
         self.tot_dist = 0
         self.num_dists = 0
 
-    def load_q(self):
+    def load_q(self, delay=False):
         """
         Loads the Q matrix and relevant attributes from a binary numpy file
         """
-        data_from_file = np.load(self.file_location + ".npz")
+        data_from_file = None
+        if delay:
+            data_from_file = np.load(self.file_location_delay + ".npz")
+        else:
+            data_from_file = np.load(self.file_location + ".npz")
         self.Q = data_from_file["q"]
+        self.Q = normalise_whole_q(self.Q)
         metadata = data_from_file["metadata"].item()
         self.num_bins_pos = metadata["num_pos"]
         self.num_bins_vel = metadata["num_vel"]
@@ -503,7 +494,7 @@ class BallBalancer:
     def load_q_npy(self):
         self.Q = np.load("q_mats/q_learn.npy")
 
-    def save_q(self):
+    def save_q(self, delay=False):
         """
         Saves the Q matrix as a zipped NumPy binary file
         Also includes an array called "metadata" with information on the Q
@@ -520,7 +511,10 @@ class BallBalancer:
                     }
 
         q = self.Q
-        np.savez(self.file_location, q=q, metadata=metadata)
+        if delay:
+            np.savez(self.file_location_delay, q=q, metadata=metadata)
+        else:
+            np.savez(self.file_location, q=q, metadata=metadata)
 
 
 OBSERVE = False
@@ -536,21 +530,21 @@ def setup_q_trainer(p, v, a):
     trainer = BallBalancer(p, v, a)
     trainer.set_up_pygame()
     trainer.create_world()
-    trainer.max_draw_iterations = 20000
+    trainer.max_draw_iterations = 100000
     if OBSERVE:
         trainer.max_draw_iterations = 0
-    trainer.explore_rate = 0.25
-    trainer.explore_reduction_freq = 2500
-    trainer.scale_reduction = 1.3
-    trainer.step_size = 1
-    trainer.learn_rate = 0.6
+    trainer.explore_rate = 1
+    trainer.explore_reduction_freq = 10000
+    trainer.scale_reduction = 1.5
+    trainer.step_size = 20
+    trainer.learn_rate = 0.5
     trainer.discount_factor = 0.99
     return trainer
 
 
-def do_q_learning(trainer, train=True):
+def do_q_learning(trainer, train=True, prnt=False):
     if not train:
-        trainer.iterations = trainer.max_draw_iterations+1
+        trainer.iterations = trainer.max_draw_iterations
         #trainer.step_size = 1
         trainer.explore_rate = 0
 
@@ -559,18 +553,20 @@ def do_q_learning(trainer, train=True):
     max_run_len = 200
     while running:
         trainer.perform_episode(prnt=False)
+        if prnt:
+            trainer.prnt = True
 
         if trainer.iterations == trainer.max_draw_iterations:
-            trainer.step_size = 1
+            trainer.step_size = 20
             trainer.explore_rate = 0
             trainer.reset_draw()
             trainer.prnt = True
             #trainer.trained = True
-        if trainer.iterations > trainer.max_draw_iterations:
+        #if trainer.iterations > trainer.max_draw_iterations:
             #trainer.draw(10)
-            a, b, c = trainer.get_ball_info_bins()
+            #a, b, c = trainer.get_ball_info_bins()
             #if c == 0 or c == 11:
-            print("Q:", a, b, c, ",", trainer.curr_action, trainer.reward, ",", str(round(trainer.curr_val_p,2)), str(round(trainer.curr_val_v, 2)), str(round(trainer.curr_val_a, 2)), trainer.Q[a, b, c])#, trainer.get_state(trainer.prev_val_p, trainer.prev_val_v, trainer.prev_val_a))##trainer.get_ball_info(), trainer.explore_rate)
+            #print("Q:", a, b, c, ",", trainer.curr_action, trainer.reward, ",", str(round(trainer.curr_val_p,2)), str(round(trainer.curr_val_v, 2)), str(round(trainer.curr_val_a, 2)), trainer.Q[a, b, c])#, trainer.get_state(trainer.prev_val_p, trainer.prev_val_v, trainer.prev_val_a))##trainer.get_ball_info(), trainer.explore_rate)
 
         if trainer.check_reset():
             current_run = 0
@@ -599,9 +595,13 @@ def do_q_learning(trainer, train=True):
 #TODO
 # - Fix jaggedyness (not so much of an issue)
 # - Fix locking to one angle when fully tilted
-# - Make more specific rewards
-# - Fix parameters
-# - Decide how to integrate learning with robot
-# - In calculate reward, it is looking at the previous state for reward,
-#   not the one that is 40 or so ago, so doesnt have that long time to
-#   see how it has really affected it
+# - Make it so doesn't learn when going from old ball to new ball
+
+
+# CHANGED
+# - removed normalisation
+
+# TO try:
+# - increase step simulation size
+# - increase/decrease wait time
+# - put wait time before doing action, to eumlate real world not having immediate actions
