@@ -8,6 +8,8 @@ import ConfigParser
 import threading
 import math
 from pybrain.tools.customxml import NetworkReader
+from pybrain.datasets import SupervisedDataSet
+from pybrain.supervised.trainers import BackpropTrainer
 from msvcrt import getch
 
 
@@ -58,45 +60,82 @@ def get_reward(p, v, np, nv):
     """
     Gets the reward based on the given state
     """
-    reward = 0
+    reward = 0.0
 
-    pos_gap = 1
+    #pos_gap = 0
     # If near center, give big reward
-    if abs(p) >= int((np)/2) - pos_gap and abs(p) <= int((np)/2) + pos_gap:
-        reward += 1
+    #if abs(p) >= int((np)/2) - pos_gap - 1 and abs(p) <= int((np)/2) + pos_gap:
+    #    reward = 1
 
-    vel_gap = 1
+    #vel_gap = 2
     # If low velocity, give medium reward
-    if abs(v) >= int((nv)/2) - vel_gap and abs(v) <= int((nv)/2) + vel_gap:
-        reward += 0.5
+    #if abs(v) >= int((nv)/2) - vel_gap and abs(v) <= int((nv)/2) + vel_gap:
+    #    reward += 0.5
 
     # If it is by the edge areas, give a big punishment
-    edge_gap = 2
-    if p > np - edge_gap or p < 0 + edge_gap:
-        reward = -1
+    edge_gap = 1
+    #if p >= np-1 - edge_gap or p <= 0 + edge_gap:
+    #    reward = -1
+    #else:
+    #    reward = 1
+
+    reward = -1
+    if p >= int(np/2)-1-edge_gap and p <= int(np/2) + edge_gap:
+        if v >= int(nv/2)-1-edge_gap and v <= int(nv/2)+edge_gap:
+            reward = 1
 
     return reward
 
 
-def update_q(q, prev_state, curr_state, action, reward, learn_rate=0.5, discount_factor=0.99):
+def get_reward_nn(inputs, max_values):
+    reward = 0
+
+    p = inputs[0]
+    p_max = max_values[0]
+
+    p_upper = int(p_max/2)
+    p_lower = int(p_max/2)
+    if p_max % 2 == 0:
+        p_lower -= 1
+
+    if p >= p_lower and p <= p_upper:
+        reward = 0.5
+    return reward
+
+
+def update_nn(net, inputs, action, outputs, reward, future_action_value, learn_rate=0.001, discount_factor=0.99, momentum=0.99):
+    outputs[action] = ((1 - learn_rate) * outputs[action]) + (learn_rate * (reward + discount_factor * max(future_action_value))) # Have to pass through twice
+
+    ds = SupervisedDataSet(3, 3)
+    ds.addSample(list(inputs), outputs)
+
+    train = BackpropTrainer(net, ds, learningrate=learn_rate, momentum=momentum)
+    train.trainEpochs(1)
+
+    print inputs, action, outputs, reward
+    return net
+
+
+def update_q(q, prev_state, curr_state, action, reward, learn_rate=0.5, discount_factor=0.99, prnt=False):
     """
     Update the Q matrix
     """
     # The old state
-    p = prev_state[0]
-    v = prev_state[1]
-    a = prev_state[2]
+    p = int(prev_state[0])
+    v = int(prev_state[1])
+    a = int(prev_state[2])
     old_val = copy.copy(q[p][v][a])
 
     # The new state
-    p2 = curr_state[0]
-    v2 = curr_state[1]
-    a2 = curr_state[2]
+    p2 = int(curr_state[0])
+    v2 = int(curr_state[1])
+    a2 = int(curr_state[2])
 
     # Update and normalise
     q[p][v][a][action] = ((1-learn_rate) * old_val[action]) + learn_rate * (reward + discount_factor * max(q[p2][v2][a2]))
-    q[p][v][a] = __normalise(q[p][v][a], p, v, a)
-    print(old_val, q[p][v][a], __normalise(q[p][v][a], p, v, a), (reward + discount_factor * max(q[p2][v2][a2])))
+    #q[p][v][a] = __normalise(q[p][v][a], p, v, a)
+    if prnt:
+        print(old_val, p, v, a, q[p][v][a], p2, v2, a2, q[p2][v2][a2], (reward + discount_factor * max(q[p2][v2][a2])))
     return q
 
 
@@ -114,22 +153,43 @@ def __normalise(q, p_var, v_var, a_var):
     return q_var
 
 
+def normalise_whole_q(q):
+    """
+    Normalises the whole q matrix
+    """
+    q_copy = copy.copy(q)
+    for p in range(0, len(q)):
+        for v in range(0, len(q[p])):
+            for a in range(0, len(q[p][v])):
+                sumup = 0
+                for action in range(0, len(q[p][v][a])):
+                    sumup += abs(q[p][v][a][action])
+                if sumup > 0:
+                    for action in range(0, len(q[p][v][a])):
+                        q_copy[p][v][a][action] = q[p][v][a][action] / sumup
+    return q_copy
+
+
 def load_network():
     net = NetworkReader.readFrom('nn_trained_networks/trained_nn.xml')
     return net
 
 
-def load_q_matrix(p, v, a, is_nao=False):
+def load_q_matrix(p, v, a, act=2, is_nao=False, is_delay=False):
     extra = ""
     if is_nao:
-        extra = "nao_"
-    data_from_file = np.load("q_mats/q_" + extra + str(p) + "_" + str(v) + "_" + str(a) + ".npz")
+        extra += "nao_"
+    if is_delay:
+        extra += "DELAY_"
+    fname = "q_mats/q_" + extra + str(p) + "_" + str(v) + "_" + str(a) + "_" + str(act) + ".npz"
+    data_from_file = np.load(fname)
+    print "Loading: ", fname
     q_mat = data_from_file["q"]
-    print(q_mat)
+    #print(q_mat)
     return q_mat
 
 
-def save_q(q, p, v, a):
+def save_q(q, p, v, a, act=2, delay=False, er=False):
     """
     Saves the Q matrix as a zipped NumPy binary file
     Also includes an array called "metadata" with information on the Q
@@ -144,8 +204,30 @@ def save_q(q, p, v, a):
     #                 "max_vel": self.max_vel,
     #                 "max_ang": self.max_ang
     #             }
+    extra = ""
+    if delay:
+        extra = "DELAY_"
+    elif er:
+        extra = "er_"
+    np.savez("q_mats/q_nao_" + extra + str(p) + "_" + str(v) + "_" + str(a) + "_" + str(act) + ".npz", q=q)
 
-    np.savez("q_mats/q_nao_" + str(p) + "_" + str(v) + "_" + str(a) + ".npz", q=q)
+
+def load_exp(p, v, a, act):
+    data_from_file = np.load("nao_experiences/nao_exp_" + str(p) + "_" + str(v) + "_" + str(a) + "_" + str(act) + ".npz")
+    return data_from_file["exp"]
+
+
+def save_exp(exp, p, v, a, max_p, max_v, max_a, act):
+    metadata = {
+                "num_pos": p,
+                "num_vel": v,
+                "num_ang": a,
+                "num_actions": act,
+                "max_pos": max_p,
+                "max_vel": max_v,
+                "max_ang": max_a
+            }
+    np.savez("nao_experiences/nao_exp_"+str(p)+"_"+str(v)+"_"+str(a)+"_"+str(act)+".npz", exp=exp, metadata=metadata)
 
 
 #  net - the neural network, can load with load_network()
@@ -155,8 +237,34 @@ def get_nn_output(net, inp):
     return action
 
 
+def get_action(q_mat, p, v, a, max_p, max_v):
+    """
+    Gets the action, using a consensus of surrounding cells
+    """
+    votes = []
+    votes.append(np.argmax(q_mat[p][v][a]))
+    if p+1 < max_p and abs(sum(q_mat[p+1][v][a])) > 0:
+        votes.append(np.argmax(q_mat[p+1][v][a]))
+    if p-1 >= 0 and abs(sum(q_mat[p-1][v][a])) > 0:
+        votes.append(np.argmax(q_mat[p-1][v][a]))
+    if v+1 < max_v and abs(sum(q_mat[p][v+1][a])) > 0:
+        votes.append(np.argmax(q_mat[p][v+1][a]))
+    if v-1 >= 0 and abs(sum(q_mat[p][v-1][a])) > 0:
+        votes.append(np.argmax(q_mat[p][v-1][a]))
+
+    action = np.argmax(q_mat[p][v][a])  # By dafault, and in case of tie, have it be the action of current state
+    if sum(votes) > len(votes)/2.0:  # True if majority of votes are 1
+        action = 1
+    elif sum(votes) < len(votes)/2.0:
+        action = 0
+    print "Original:", np.argmax(q_mat[p][v][a]), "decided:", action, "votes:", votes, sum(votes), len(votes)/2.0
+
+    return action
+    
+
+
 class Nao:
-    def __init__(self, ip, port=9559):
+    def __init__(self, ip, angs=21, port=9559):
         # SET UP THE NAO
         self.NAO_PORT = port  # 9559
         self.NAO_IP = ip  # "169.254.254.250"
@@ -182,18 +290,17 @@ class Nao:
                        "LElbowYaw", "LElbowRoll", "LWristYaw",
                        "RElbowYaw", "RElbowRoll", "RWristYaw"]
 
-        # self.tilt_left = [0.18250393867492676, -0.08748006820678711,
-        #                   0.6727747321128845, 0.14530789852142334,
-        #                   -1.9174580574035645, -0.5, 0.15029001235961914,
-        #                   1.735066294670105, 0.9, -0.07674193382263184]
-        self.tilt_left = [0.18250393867492676, -0.15,
-                          0.6727747321128845, 0.17,
-                          -1.7, -0.8, 0.15029001235961914,
-                          1.6, 0.5, -0.1]
 
+        # self.tilt_left = [0.18250393867492676, -0.15,
+        #                  0.6727747321128845, 0.17,
+        #                  -1.7, -0.8, 0.15029001235961914,
+        #                  1.6, 0.5, -0.1]
+
+        ##self.tilt_left = [0.5194180607795715, -0.15755724906921387, 0.33260154724121094, 0.15440550446510315, -1.6312140226364136, -0.592301607131958, 0.11547386646270752, 1.6693739891052246, 0.7076734900474548, -0.13481613993644714]
+        self.tilt_left = [0.29525595903396606, -0.15372799336910248, 0.5568179488182068, 0.15815134346485138, -1.6769975423812866, -0.7307573556900024, 0.13868460059165955, 1.6235711574554443, 0.5692337155342102, -0.11160540580749512]
         # self.min_angle = float(config.get("nao_params", "right_angle_max"))
         # self.max_angle = float(config.get("nao_params", "left_angle_max"))
-        self.num_angles = 15 #CHANGE THIS SO UPDATES# float(config.get("nao_params", "num_angles"))
+        self.num_angles = angs  # float(config.get("nao_params", "num_angles"))
 
         self.tilt_right = flip_angles(self.tilt_left, self.joints)
         self.angle_lr = self.tilt_left  # The current tilt in the left-right axis
@@ -215,7 +322,7 @@ class Nao:
         self.ball_pos_fb = 0
         self.ball_vel_lr = 0
         self.ball_vel_fb = 0
-        self.ball_ang_lr = 0
+        self.ball_ang_lr = self.angle_lr_interpolation
         self.ball_ang_fb = 0
 
     def initial_setup(self):
@@ -248,7 +355,7 @@ class Nao:
         self.motionProxy.setAngles(self.shoulder_roll_joints, self.shoulder_roll_angles, speed)
         time.sleep(0.5)
 
-        self.interpolate_angles_fixed_lr(5, 10)  # Set angles to be middle value
+        self.interpolate_angles_fixed_lr(int(self.num_angles/2), self.num_angles)  # Set angles to be middle value
         self.go_to_interpolated_angles_lr(speed=speed)
         time.sleep(0.5)
 
@@ -268,11 +375,12 @@ class Nao:
         """
         new_angs = [0 for i in self.tilt_left]  # Construct empty array
         if num_interpolations == 0:
-            num_interpolations = self.num_angles  # Use the value loaded from file by default
+            num_interpolations = self.num_angles -1 # Use the value loaded from file by default
         proportion1 = float(interpolation_value) / float(num_interpolations)
         proportion2 = 1 - proportion1
         for i in range(0, len(new_angs)):
             new_angs[i] = proportion1 * self.tilt_left[i] + proportion2 * self.tilt_right[i]
+        #print proportion1, proportion2, interpolation_value, num_interpolations
         self.angle_lr = new_angs
         self.angle_lr_interpolation = interpolation_value
 
@@ -281,11 +389,11 @@ class Nao:
         Given the two sets of angles that describe the full left tilt and full right tilt,
         go the angles that describe the position in between, determined by change in interpolation value
         """
-        self.angle_lr_interpolation = self.angle_lr_interpolation + interpolation_value_change  # Update the value based on the relaive change of interpolated angle
+        self.angle_lr_interpolation = self.angle_lr_interpolation + interpolation_value_change  # Update the value based on the relative change of interpolated angle
         if num_interpolations == 0:
-            num_interpolations = self.num_angles  # Use the value loaded from file by default
+            num_interpolations = self.num_angles-1  # Use the value loaded from file by default
         if upper_bound == 0:
-            upper_bound = num_interpolations - 1
+            upper_bound = num_interpolations
 
         if self.angle_lr_interpolation < lower_bound:  # Make sure new interpolation value is bounded
             self.angle_lr_interpolation = lower_bound
@@ -294,7 +402,7 @@ class Nao:
 
         new_angs = [0 for i in self.tilt_left]  # Construct empty array
         proportion1 = float(self.angle_lr_interpolation) / float(num_interpolations)
-        proportion2 = 1 - proportion1
+        proportion2 = 1.0 - proportion1
         for i in range(0, len(new_angs)):
             new_angs[i] = proportion1 * self.tilt_left[i] + proportion2 * self.tilt_right[i]
         self.angle_lr = new_angs
@@ -316,7 +424,11 @@ class Nao:
         return self.motionProxy.getAngles(joints, False)  # False means absolute not relative
 
     def go_to_interpolated_angles_lr(self, speed=1):
-        self.motionProxy.setAngles(self.joints, self.angle_lr, speed)
+        #id = self.motionProxy.post.setAngles(self.joints, self.angle_lr, speed)
+        id = self.motionProxy.post.angleInterpolationWithSpeed(self.joints, self.angle_lr, speed)
+        #print self.motionProxy.isRunning(id)
+        self.motionProxy.wait(id, 0)
+        #print self.motionProxy.isRunning(id)
 
     def go_to_interpolated_angles_fb(self, speed=1):
         self.motionProxy.setAngles(self.joints, self.angle_fb, speed)
@@ -435,3 +547,27 @@ class Nao:
 # - Get angles and other data saved in config file
 # - Check if lost ball - maybe also with threading
 # - Change loading q matrix so that it applies the metadata to nao
+
+def prnt():
+    experiences = load_exp(12, 12, 10, 2)
+    for i in range(0, len(experiences)):
+            for j in range(0, len(experiences[i])):
+                for k in range(0, len(experiences[i][j])):
+                    print i, j, k, experiences[i][j][k]
+
+def clean_experiences(experiences):
+    for i in range(0, len(experiences)):
+        for j in range(0, len(experiences[i])):
+            for k in range(0, len(experiences[i][j])):
+                to_remove = []
+                for e in range(0, len(experiences[i][j][k][0])):
+                    if experiences[i][j][k][0][e]["new_state"][2] == k:  # Angel hasn't changed
+                        to_remove.append((i, j, k, e))
+                offset = 0
+                for r in to_remove:
+                    arr = experiences[r[0]][r[1]][r[2]][0]
+                    print(r)
+                    experiences[r[0]][r[1]][r[2]][0] = np.delete(arr, r[3]-offset)
+                    offset+=1
+    return experiences
+#prnt()

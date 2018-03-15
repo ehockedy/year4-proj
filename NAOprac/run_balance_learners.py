@@ -4,13 +4,13 @@ import trainNN as nn
 import trainQNN as qnn
 
 
-option = 1
+option = 5
 
 if option == 1:
-    trainer = q.setup_q_trainer(6, 6, 6)
-    trainer.load_q(delay=False)  # THIS WORKS WELL - HAVING +1 reward for good state worked
+    trainer = q.setup_q_trainer(12, 12, 7, is_q_not_s=True)
+    #trainer.load_q(delay=True)
     q.do_q_learning(trainer, train=True, prnt=False)
-    trainer.save_q(delay=True)
+    #trainer.save_q(delay=True)
 elif option == 2:
     trainer = wal.setup_wal_trainer()
     #wal.do_watch_and_learn_training(trainer, 50000, save_q=True)
@@ -36,4 +36,10 @@ elif option == 4:
     net = qnn.load_q_network()  # THIS LEADS TO NO NOTICABLE IMPROVEMENT
     qnn.evaluate_nn(trainer, number_of_trials=500, iteration_limit=200,
                     action_threshold=0.0, draw_output=False,
-                    learn_rate=0.3, discount_factor=0.99, train=False, net=net)
+                    learn_rate=0.3, discount_factor=0.99, train=True, net=net)
+elif option == 5:
+    trainer = q.setup_q_trainer(12, 12, 10, ends=True)
+    trainer.load_q(delay=True)
+    #q.do_q_learning_sides(trainer, train=True, prnt=False)
+    q.do_experience_replay(trainer, 1000000, True)
+    trainer.save_q(delay=True, er=True)

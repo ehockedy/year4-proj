@@ -37,7 +37,7 @@ def normalise_whole_q(q):
 
 
 class BallBalancer:
-    def __init__(self, p_bins=8, v_bins=8, a_bins=10):
+    def __init__(self, p_bins=8, v_bins=8, a_bins=10, ends=False, is_q_not_s=True):
 
         self.tray_width = 250
         self.tray_height = 20
@@ -46,7 +46,7 @@ class BallBalancer:
         self.tray_angle = -0.05  # np.pi / 24
         self.rotation = 50000
         self.force_distance = self.tray_width/2
-        self.ball_radius = 25
+        self.ball_radius = 15
         self.ball_mass = 1
 
         self.num_actions = 2  # Number of actions that can be taken. Normally 2, rotate clockwise or anticlockwise
@@ -62,12 +62,16 @@ class BallBalancer:
 
         self.file_location = "q_mats/q_" + str(self.num_bins_pos) + "_" + str(self.num_bins_vel) + "_" + str(self.num_bins_ang) + "_" + str(self.num_actions)
         self.file_location_delay = "q_mats/q_DELAY_" + str(self.num_bins_pos) + "_" + str(self.num_bins_vel) + "_" + str(self.num_bins_ang) + "_" + str(self.num_actions)
+        self.file_location_er = "q_mats/q_er_" + str(self.num_bins_pos) + "_" + str(self.num_bins_vel) + "_" + str(self.num_bins_ang) + "_" + str(self.num_actions)
 
         self.iterations = 1
 
         self.Q = np.zeros((self.num_bins_pos, self.num_bins_vel, self.num_bins_ang, self.num_actions))
         #self.Q.fill(0.5)
         self.q_freq = np.zeros((self.num_bins_pos, self.num_bins_vel, self.num_bins_ang))
+
+        self.curr_action = 0
+        self.next_action = 0
 
         self.reward = 0
 
@@ -95,9 +99,15 @@ class BallBalancer:
         self.tot_dist = 0
 
         self.step_size = 10  # When stepping simulation after taking action, to allow time to see what ball does
+        self.sim_speed = 10  # Speed to step the simulation by. Not draw speed
 
+        self.q_learn = is_q_not_s  # Whether to do q_learning, not SARSA
         self.trained = False
         self.prnt = False
+
+        self.tray_has_ends = ends  # Whether to add ends to the tray
+        self.num_end_touches = 0
+        self.touched_in_this_iteration = False
 
         self.run_continuously_with_key_press = True  # Used for testing - whether requires a key input to move to next step of simulation
 
@@ -112,15 +122,14 @@ class BallBalancer:
 
         # Choose best action
         self.curr_action = self.__choose_action(self.prev_bin_p, self.prev_bin_v, self.prev_bin_a)
-
-        # Remember the ball values before taking any action
-        #self.__update_altprev_values()
+        if not self.q_learn:  # For SARSA
+            self.curr_action = self.next_action
 
         # Get the new, updated states
         self.curr_bin_p, self.curr_bin_v, self.curr_bin_a = self.__change_state(self.prev_bin_a, self.curr_action)
 
-        #if self.curr_bin_a == 0: #and self.curr_bin_p == 3 and self.curr_bin_v == 5:
-        #    print(self.curr_bin_p, self.curr_bin_v)
+        if not self.q_learn:  # Get the next action for updating SARSA
+            self.next_action = self.__choose_action(self.curr_bin_p, self.curr_bin_v, self.curr_bin_a)
 
         # Update Q matrix
         if not self.trained:
@@ -128,17 +137,102 @@ class BallBalancer:
                 reward = self.__calculate_reward()
                 self.reward = reward
                 old_val = copy.copy(self.Q[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a])
-                self.Q[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a][self.curr_action] = \
-                    ((1-self.learn_rate) * old_val[self.curr_action]) + self.learn_rate * (reward + self.discount_factor * max(self.Q[self.curr_bin_p][self.curr_bin_v][self.curr_bin_a]))
-                #self.Q = self.__normalise(self.prev_bin_p, self.prev_bin_v, self.prev_bin_a)
+                if self.q_learn:
+                    self.Q[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a][self.curr_action] = \
+                        ((1-self.learn_rate) * old_val[self.curr_action]) + self.learn_rate * (reward + self.discount_factor * max(self.Q[self.curr_bin_p][self.curr_bin_v][self.curr_bin_a]))
+                else:  # Use SARSA
+                    self.Q[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a][self.curr_action] = \
+                        ((1-self.learn_rate) * old_val[self.curr_action]) + self.learn_rate * (reward + self.discount_factor * self.Q[self.curr_bin_p][self.curr_bin_v][self.curr_bin_a][self.next_action])
 
                 if self.prnt:
                     print("\n\nOld:", self.prev_bin_p, self.prev_bin_v, self.prev_bin_a, ", New:", self.curr_bin_p, self.curr_bin_v, self.curr_bin_a,
                           "\nAction:", self.curr_action, ", Reward:", reward, ", Extra:", self.learn_rate * (reward + self.discount_factor * max(self.Q[self.curr_bin_p][self.curr_bin_v][self.curr_bin_a])),
-                          "\nQ_old:", old_val, ", Q_new:", self.Q[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a], ", Q_future:", self.Q[self.curr_bin_p][self.curr_bin_v][self.curr_bin_a])
+                          "\nQ_old:", old_val, ", Q_new:", self.Q[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a], ", Q_future:", self.Q[self.curr_bin_p][self.curr_bin_v][self.curr_bin_a],
+                          "\n\n")
             self.q_freq[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a] += 1
-        #if self.curr_bin_a == 0 and self.curr_bin_p == 4 and self.curr_bin_a == 5:
-        #    print(reward, self.curr_bin_p, self.curr_bin_v, self.curr_bin_a, "  ", self.prev_bin_p, self.prev_bin_v, self.prev_bin_a)
+
+    def perform_episode_er(self, prnt=False):
+        """
+        Carry out an action using information from a action carried out by the real nao
+        Returns true if successfully executed
+        """
+        #self.prev_bin_p, self.prev_bin_v, self.prev_bin_a = self.get_state(self.prev_val_p, self.prev_val_v, self.prev_val_a)  # Get current state as normal
+        p = random.randint(0, self.num_bins_pos-1)
+        v = random.randint(0, self.num_bins_vel-1)
+        a = random.randint(0, self.num_bins_ang-1)
+        #print(p, v, a)
+        experience = self.er_mat[p][v][a][0]
+        while len(experience) == 0:
+            
+            p = random.randint(0, self.num_bins_pos-1)
+            v = random.randint(0, self.num_bins_vel-1)
+            a = random.randint(0, self.num_bins_ang-1)
+            #print(p, v, a)
+            experience = self.er_mat[p][v][a][0]
+        #print(experience)
+        #done = False  # Whether the state existed in the experience matrix, and so could be carried out
+        #if len(experience) > 0:
+        exp = random.choice(experience)
+        action = exp["action"]
+        new_state = exp["new_state"]
+        p_new, v_new, a_new = new_state
+        #self.update_state_from_er(new_state)
+        #print(self.curr_bin_p, self.curr_bin_v, self.curr_bin_a)
+        #self.curr_bin_p, self.curr_bin_v, self.curr_bin_a = new_state[0], new_state[1], new_state[2]
+        #print(self.curr_bin_p, self.curr_bin_v, self.curr_bin_a)
+
+        #reward = exp["reward"]
+        self.curr_bin_p = p_new
+        self.curr_bin_v = v_new
+        reward = self.__calculate_reward()
+        #reward = exp["reward"]
+        old_val = copy.copy(self.Q[p][v][a])
+        
+        self.Q[p][v][a][action] = \
+            ((1-self.learn_rate) * old_val[action]) + self.learn_rate * (reward + self.discount_factor * max(self.Q[p_new][v_new][a_new]))
+        # if self.prnt:
+        #     print("Old:", p, v, a, ", New:", p_new, v_new, a_new,
+        #             "\nAction:", action, ", Reward:", reward, ", Extra:", self.learn_rate * (reward + self.discount_factor * max(self.Q[p_new][v_new][a_new])),
+        #             "\nQ_old:", old_val, ", Q_new:", self.Q[p][v][a], ", Q_future:", self.Q[p_new][v_new][a_new], "\n\n")
+        #done = True
+
+        #return done
+
+    def update_state_from_er(self, new_state):
+        """
+        Moves the ball to a specific state. Does not let the simulation do it itself
+        """
+        extra = self.step_size
+        # Carry out any extra turns
+        for i in range(0, extra):
+            self.__step_simulation(self.sim_speed)
+            self.trayBody.angular_velocity = 0  # Dont want tray to move under balls weight when not moving
+        p, v, a = self.__get_vals_from_state(new_state)
+        self.ball.body.position = Vec2d(self.tray_x_pos + p, self.ball.body.position.y)  # CHANGE THIS SO THAT DOES ACTUAL DIST ALONG THE TRAY, NOT DIRECT
+        #self.ball.body.update_position(self.ball.body, Vec2d(-300, 0))
+        self.ball.body.velocity = Vec2d(v, 0)
+        self.trayBody.angle = a
+        self.__step_simulation(self.sim_speed)
+        self.trayBody.angular_velocity = 0  # Dont want tray to move under balls weight when not moving
+
+    def __get_vals_from_state(self, state):
+        """
+        Given the state bin values, gives the values from the center of each bin
+        Maybe randomize within the bin
+        """
+        multiplier_p = (2 * state[0] - (self.num_bins_pos-1)) / self.num_bins_pos
+        multiplier_v = (2 * state[1] - (self.num_bins_vel-1)) / self.num_bins_vel
+        multiplier_a = (2 * state[2] - (self.num_bins_ang-1)) / self.num_bins_ang
+
+        val_p = multiplier_p * self.max_pos
+        val_v = multiplier_v * self.max_vel
+        val_a = multiplier_a * self.max_ang
+
+        return val_p, val_v, val_a
+
+    def load_er_mat(self):
+        data_from_file = np.load("nao_experiences/nao_exp_" + str(self.num_bins_pos) + "_" + str(self.num_bins_vel) + "_" + str(self.num_bins_ang) + "_" + str(self.num_actions) + ".npz")
+        self.er_mat = data_from_file["exp"]
 
     def set_up_pygame(self):
         pygame.init()
@@ -151,7 +245,8 @@ class BallBalancer:
         self.draw_options = pymunk.pygame_util.DrawOptions(self.screen)
 
     def create_world(self):
-        fp = [(self.tray_width/2, -self.tray_height/2), (-self.tray_width/2, self.tray_height/2), (self.tray_width/2, self.tray_height/2), (-self.tray_width/2, -self.tray_height/2)]
+        fp = [(self.tray_width/2, -self.tray_height/2), (-self.tray_width/2, self.tray_height/2), (self.tray_width/2, self.tray_height/2), (-self.tray_width/2, -self.tray_height/2), (-self.tray_width/2, -self.tray_height/2)]
+
         mass = 100
         moment = pymunk.moment_for_poly(mass, fp[0:2])
 
@@ -159,6 +254,12 @@ class BallBalancer:
         self.trayBody.position = self.tray_x_pos, self.tray_y_pos
         self.trayBody.angle = self.tray_angle
         trayShape = pymunk.Poly(self.trayBody, fp)
+        if self.tray_has_ends:
+            side1 = [(self.tray_width/2, self.tray_height/2), (self.tray_width/2, self.tray_height*4), (self.tray_width/2-1, self.tray_height*4), (self.tray_width/2-1, self.tray_height/2)]
+            side2 = [(-self.tray_width/2, self.tray_height/2), (-self.tray_width/2, self.tray_height*4), (-self.tray_width/2+1, self.tray_height*4), (-self.tray_width/2+1, -self.tray_height/2)]
+            self.side1_shape = pymunk.Poly(self.trayBody, side1)
+            self.side2_shape = pymunk.Poly(self.trayBody, side2)
+            self.space.add(self.side1_shape, self.side2_shape)
         self.space.add(self.trayBody, trayShape)
 
         trayJointBody = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
@@ -196,7 +297,10 @@ class BallBalancer:
         self.total_time += t
         if self.iterations % self.explore_reduction_freq == 0:
             self.explore_rate /= self.scale_reduction
-            print("Iterations:", self.iterations, "Average:", self.total_time / self.iterations, self.explore_rate)
+            if self.tray_has_ends:
+                print("Iterations:", self.iterations, "Touches freq:", self.num_end_touches / self.iterations, self.explore_rate)
+            else:
+                print("Iterations:", self.iterations, "Average:", self.total_time / self.iterations, self.explore_rate)
 
     def terminate(self, curr_time):
         """
@@ -246,14 +350,11 @@ class BallBalancer:
         return p_bin, v_bin, a_bin
 
     def __choose_action(self, p_var, v_var, a_var):
-        action = random.randint(0, self.num_actions-1)
+        action = np.argmax(self.Q[p_var][v_var][a_var])
         # if p_var >= 0 and v_var >= 0:
-        if random.random() > self.explore_rate:
-            action = np.argmax(self.Q[p_var][v_var][a_var])
-            #print("NOT RANDOM", self.Q[p_var][v_var][a_var], action)
-        #         action = random.randint(0, self.num_actions-1)
-        #     else:
-        #         action = np.argmax(self.Q[p_var][v_var][a_var])
+        if random.random() < self.explore_rate:
+            while action == np.argmax(self.Q[p_var][v_var][a_var]):
+                action = random.randint(0, self.num_actions-1)
 
         # Select action based on the proportion of weigh that action has
         #if self.Q[p_var][v_var][a_var][0] > 0 and self.Q[p_var][v_var][a_var][1] > 0:
@@ -274,7 +375,8 @@ class BallBalancer:
         extra = self.step_size
         # Carry out any extra turns
         for i in range(0, extra):
-            self.__step_simulation()
+            self.__step_simulation(self.sim_speed)
+            self.trayBody.angular_velocity = 0  # Dont want tray to move under balls weight when not moving
         turn = True
         turn_counter = 0
         while turn:
@@ -302,7 +404,7 @@ class BallBalancer:
             #             print("OK", p, p2, v, v2)
 
             turn_counter += 1
-            self.__step_simulation()
+            self.__step_simulation(self.sim_speed)
 
         self.trayBody.angular_velocity = 0  # To stop turning once turn has occured
 
@@ -310,12 +412,12 @@ class BallBalancer:
 
         return ppp, vvv, aaa
 
-    def __step_simulation(self):
+    def __step_simulation(self, speed=5):
         """
-        Move the  simulation on, and update the values of the ball
+        Move the simulation on, and update the values of the ball
         """
         dt = 1.0/60.0/5.
-        for x in range(5):
+        for x in range(speed):
             self.space.step(dt)
 
         # Update the real values
@@ -329,6 +431,10 @@ class BallBalancer:
 
         if self.prnt:
             self.draw(60)
+
+        if self.is_in_collision_with_end() and not self.touched_in_this_iteration:
+            self.num_end_touches += 1
+            self.touched_in_this_iteration = True
 
     def __update_altprev_values(self):
         """
@@ -352,14 +458,15 @@ class BallBalancer:
         gap_left = 0
         if self.num_bins_pos % 2 == 0:
             gap_left = 1
-        gap = 0
+        gap = 1
+        gap2 = 1
         if self.curr_bin_p >= int((self.num_bins_pos)/2) - gap - gap_left and self.curr_bin_p <= int((self.num_bins_pos)/2) + gap:
-            if self.curr_bin_v >= int((self.num_bins_vel)/2) - gap - gap_left and self.curr_bin_v <= int((self.num_bins_vel)/2) + gap:
-                reward = 1
+            if self.curr_bin_v >= int((self.num_bins_vel)/2) - gap2 - gap_left and self.curr_bin_v <= int((self.num_bins_vel)/2) + gap2:
+                reward = 5
             else:
-                reward = -0.5
+                reward = -1
         else:
-            reward = -0.5
+            reward = -1
 
         return reward
 
@@ -382,13 +489,14 @@ class BallBalancer:
     def __add_ball(self):
         inertia = pymunk.moment_for_circle(self.ball_mass, 0, self.ball_radius, (0, 0))
         body = pymunk.Body(1, inertia)
-        body.position = random.randint(self.tray_x_pos - self.max_pos, self.tray_x_pos + self.max_pos), 150  # Y as 150 is arbitrary, jut makes sure is above tray
+        extra = int(self.max_pos / 4)
+        body.position = random.randint(self.tray_x_pos - self.max_pos + extra, self.tray_x_pos + self.max_pos - extra), 150  # Y as 150 is arbitrary, jut makes sure is above tray
         shape = pymunk.Circle(body, self.ball_radius, (0, 0))
         shape.elasticity = 0  # 0.95
         self.space.add(body, shape)
 
         self.prev_val_p = body.position[0]
-        self.prev_val_v = random.random() * (self.max_vel/2) * (-1 ** random.randint(1, 2))
+        self.prev_val_v = random.random() * (self.max_vel/4) * (-1 ** random.randint(1, 2))
         self.prev_val_a = self.trayBody.angle
 
         self.curr_val_p = 0  # body.position[0]
@@ -470,6 +578,15 @@ class BallBalancer:
         self.tot_dist = 0
         self.num_dists = 0
 
+    def is_in_collision_with_end(self):
+        collide = False
+        if self.tray_has_ends:
+            if len(self.side1_shape.shapes_collide(self.ball).points) > 0:
+                collide = True
+            elif len(self.side2_shape.shapes_collide(self.ball).points) > 0:
+                collide = True
+        return collide
+
     def load_q(self, delay=False):
         """
         Loads the Q matrix and relevant attributes from a binary numpy file
@@ -480,7 +597,7 @@ class BallBalancer:
         else:
             data_from_file = np.load(self.file_location + ".npz")
         self.Q = data_from_file["q"]
-        self.Q = normalise_whole_q(self.Q)
+        #self.Q = normalise_whole_q(self.Q)
         metadata = data_from_file["metadata"].item()
         self.num_bins_pos = metadata["num_pos"]
         self.num_bins_vel = metadata["num_vel"]
@@ -494,7 +611,7 @@ class BallBalancer:
     def load_q_npy(self):
         self.Q = np.load("q_mats/q_learn.npy")
 
-    def save_q(self, delay=False):
+    def save_q(self, delay=False, er=False):
         """
         Saves the Q matrix as a zipped NumPy binary file
         Also includes an array called "metadata" with information on the Q
@@ -513,8 +630,14 @@ class BallBalancer:
         q = self.Q
         if delay:
             np.savez(self.file_location_delay, q=q, metadata=metadata)
+            print("Saved as:", self.file_location_delay)
+        elif er:
+            np.savez(self.file_location_er, q=q, metadata=metadata)
+            print("Saved as:", self.file_location_er)
         else:
             np.savez(self.file_location, q=q, metadata=metadata)
+            print("Saved as:", self.file_location)
+        
 
 
 OBSERVE = False
@@ -526,21 +649,32 @@ else:
     training_show = False
 
 
-def setup_q_trainer(p, v, a):
-    trainer = BallBalancer(p, v, a)
+def setup_q_trainer(p, v, a, ends=False, is_q_not_s=True):
+    trainer = BallBalancer(p, v, a, ends, is_q_not_s)
     trainer.set_up_pygame()
     trainer.create_world()
-    trainer.max_draw_iterations = 100000
+    trainer.max_draw_iterations = 25000
     if OBSERVE:
         trainer.max_draw_iterations = 0
-    trainer.explore_rate = 1
-    trainer.explore_reduction_freq = 10000
-    trainer.scale_reduction = 1.5
-    trainer.step_size = 20
+    trainer.explore_rate = 0.5
+    trainer.explore_reduction_freq = 5000
+    trainer.scale_reduction = 1.2
+    trainer.step_size = 10
     trainer.learn_rate = 0.5
     trainer.discount_factor = 0.99
+    trainer.sim_speed = 15
     return trainer
 
+#Changed (for sim_speed = 10):
+# step size is 10 from 20
+# reduced range of new ball entrance position to half of max pos from centre as opposed to whole range
+# reduced range of starting values of velocity to max_vel / 4 as opposed to / 2
+# number of divisions is 12,12 for pos, vel, as opposed to 6
+# reward gap is 2, as opposed to 0
+
+#To try:
+# - add bits at the side of the tray to emulate the robot tray
+# - Increase number of divisions
 
 def do_q_learning(trainer, train=True, prnt=False):
     if not train:
@@ -557,7 +691,7 @@ def do_q_learning(trainer, train=True, prnt=False):
             trainer.prnt = True
 
         if trainer.iterations == trainer.max_draw_iterations:
-            trainer.step_size = 20
+            #trainer.step_size = 0
             trainer.explore_rate = 0
             trainer.reset_draw()
             trainer.prnt = True
@@ -590,6 +724,48 @@ def do_q_learning(trainer, train=True, prnt=False):
     #     for j in range(0, trainer.num_bins_vel):
     #         for k in range(0, trainer.num_bins_ang):
     #             print(i, j, k, ":", trainer.q_freq[i][j][k])
+
+
+def do_q_learning_sides(trainer, train=True, prnt=False):
+    trainer.iterations = 1
+    trainer.max_num_iterations = 100000
+    trainer.max_draw_iterations = int(trainer.max_num_iterations*0.95)
+    trainer.explore_reduction_freq = 10000
+    if not train:
+        trainer.iterations = trainer.max_draw_iterations
+        trainer.explore_rate = 0
+    #trainer.load_er_mat()
+    
+    running = True
+    trainer.prnt = prnt
+    #er_prob = 0
+    while trainer.iterations < trainer.max_num_iterations and running:
+        #if random.random() < er_prob or trainer.iterations <= 2:
+        trainer.perform_episode(prnt)
+
+
+        if trainer.iterations == trainer.max_draw_iterations:
+            trainer.explore_rate = 0
+            trainer.reset_draw()
+            trainer.prnt = True
+
+        trainer.reduce_explore_rate()
+
+        running = trainer.continue_running(training_wait)
+        trainer.iterations += 1
+        trainer.touched_in_this_iteration = False
+
+def do_experience_replay(trainer, iter, show=False, prnt=False):
+    trainer.load_er_mat()
+    trainer.learn_rate = 0.4
+    trainer.sim_speed = 15
+    for i in range(0, iter):
+        if i%1000 == 0:
+            print(i)
+        trainer.perform_episode_er(prnt)
+
+    if show:  # Show the balancer
+        do_q_learning_sides(trainer, False, True)
 
 
 #TODO
