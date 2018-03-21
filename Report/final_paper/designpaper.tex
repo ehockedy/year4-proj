@@ -4,6 +4,9 @@
 \usepackage{harvard}
 \usepackage{algorithm}
 \usepackage{algpseudocode}
+\usepackage{array}
+\usepackage{graphicx}
+\graphicspath{ {images/} }
 
 \citationmode{abbr}
 \bibliographystyle{agsm}
@@ -134,27 +137,83 @@ A step further in making the simulation as close to the robot as possible was us
 Unfotunately, once again the improvement was not significant, but perhaps marginally better. The most interesting observation was that the simulation, when ran after experience replay, mimiced the behaviour of the robot quite closely - the ball was rolled from end to end. This shows that the simulation was capable of learning the robot's behaviour, but not the other way around. MOVE TO RESULTS?
 
 \section{Results}
-\section{Evaluation}
-\section{Conclusion}
-
-
+\subsection{Performance Metrics}
+Due to the natrue of the task, it is difficult to quantify the overall quality of how well the task was learnt. It is easy to see if it works well enough to be considered complete, because the ball stays on the tray, but it is difficult to compare between results that do work, and between those that don't work. The most useful metric is not one that describes the quality of the performance as a whole, but one that describes the performance over a period of time. In this evaluation, the position of the ball over time is used. This is useful as it shows directly where the ball was in relation to the tray. If the ball is moving from side to side then it is clearly not balanced well. If it stays in the middle, it has successfully been balanced. For each training run, the position at each step of the simulation was recorded. This information can be plotted on a graph showing the motion of the ball over time. 
+\subsection{Neural Network in Simulation}
+\subsection{Neural Network with Robot}
+\subsection{Q-learning Parameter Refinement}
+An important part of the training process involved finding the parameters that allowed for the most effective and fastest training. A few rough tests were done initially to get some starting parameter values, and further tests were performed to refine these values. The parameters and initial values are described in table 1.
 \begin{table}[htb]
 \centering
-\caption{UNITS FOR MAGNETIC PROPERTIES}
+\caption{INITIAL Q-LEARNING PARAMETERS}
 \vspace*{6pt}
-\label{units}
-\begin{tabular}{ccc}\hline\hline
-Symbol & Quantity & Conversion from Gaussian \\ \hline
+\label{q_params}
+\begin{tabular}{>{\raggedright}p{0.21\linewidth}p{0.5\linewidth}p{0.1\linewidth}}\hline
+Parameter & Description& Original Value\\ \hline\hline
+Initial exploration rate & The starting probability of taking a different action to the one though to be the optimal & 0.5\\ \hline
+Exploration rate reduction frequency & The number of times the exploration rate is reduced & 10\\ \hline
+Exploration rate reduction value & The amount to reduce the exploration rate by & 20\% \\\hline
+Learn rate & The proportion the updated value in the Q-matrix is made up from learnt information compared to existing information & 0.4 \\\hline
+Discount factor & The influence future rewards have on updating the value for the current state and action & 0.99 \\\hline
+\end{tabular}
+\end{table}
+To refine these values, a grid search was performed to find the best combination. It is likely that many of these parameter values are dependent on eah cother, so it was important to test all combinations of different values.
+
+As well as looking at the ball position over time, a second metric was used to assess the speed and quality of learning. The number of iterations that the ball was in contact with one of the end barriers was recorded. This value was divided by the number of iterations to give a proportion of the time that the ball was in contact with the edge barriers. A lower value is preferred, and the change in this value shows how well the agent is learning. 
+
+Each of the following tests were ran for 50000 iterations, with an iteration consisting of seeing the current state, picking an action, and performing the action.
+
+The first tests were done on the parameters related to the exploration rate, namely the initial eploration rate, reduction frequency, and reduction value. Since they all affect the exploration rate, they are not independent of one another, so different combinations were tested together. The quality of each parameter combination was judged by analysing the position of the ball over 5000 time frames using the trained Q-matrix, 0 explore rate, and no training. The best parameter combination was the one that gave the graph with the ball closest to 0 for the longest amount of time, and fewest movements to the edge of the tray. The best combination of parameters was found to be initial exploration rate = 0.5, exploration rate reduction frequency = 20, and exploration rate value = 1.5. An initial exploration rate of 0.5 makes sense, since at the start there is no optimal action for any state - each action has an initial value of 0, so the first action is chosen by default. Having an exploration rate of 0.5 means half the time that action will be taken, and the other half of the time the other action will be taken making it completely random. This is a good way to get a good starting sample of actions throughout the matrix. The combination of reduction value multiplier 1.5 and reduction frequency 20 has no direct explanation, it just seems to be the case that that speed and rate of phasing out the exploration rate works well. It allows for suffecient exploration whilst training, but diminishes quick enough to not cause random actions when the best actions have already been found. Figure 1 shows the performance of the trained Q-matrix with these parameters over the 5000 time frames.
+\begin{figure}[H]
+	\includegraphics{100_small}
+	\caption{The position of the ball over 5000 actions. Note that the width of the tray is 125 in each direction, so the ball stays very confortably in the centre}
+\end{figure}
+\begin{figure}[H]
+	\includegraphics{101_small}
+	\caption{An example of learnt behaviour that was not successful. The initial eploration rate was 0.2, reduction value was 1.5, number of reductions was 5. The repetition of the pattern shows that it has slightly learnt the ability to balance, however the amplitude is large. The ball also goes to the end quite frequently}
+\end{figure}
+%Sims 88 to 115 compares exploration rate stuff
+% After 1st round of tests, 100 was best. This is erv:1.5, init:0.5, num:20. About 30000 iterations to converge
+%\subsubsection{Initial exploration rate}
+
+Learn rate and discount factor were also experimented using the same method. Low values of both gave poor results, and for the higher values, difference in performance was relatively small. However throguh repreated tests it was found that the best values were a learn rate of 0.4 and a discount factor of 0.9. These results make sense. The learn rate is just below half, showing that the new information is important to the updating process, but is just a bit less important than the existing data. Anything higher could drown out the existing value stored, and since there is quite a lot of exploration, especially early on, it is important to not let the agent change its values too hastily. The discount factor is high since for a task like this it is certainly important to value future actions. If not, it would send the ball to the centre of the tray as quick as possible, whether sometimes it is better to move it gradually to avoid overshooting. A possible reason 0.9 was superior to 0.99 (if only marginally) is that it is sometimes important to focus on the very short term, for instance when right at the edge of the tray - it is better to move the ball away quickly than roll off.
+
+Convergence speed is another important aspect to learning. In a small task like this training takes less than a minute. For a larger task however, it is important to reach the desired performance level as soon as possible. It is hard to know when the task is fully leant since there is no exact completion criteria. However, looking at the plot of position against time for the whole learning procedure can show when the ball is kept in a constant position. Figure 2 shows this for the agent learning over 50000 iterations with the refined parameters.
+\begin{figure}[H]
+	\includegraphics{153_small}
+	\caption{The position of the ball over an entire training session. At the start the ball rapidly rolls between weither side of the tray. Over time this becomes less frequent as behaviour to prevent this is leanrt, and the random actions happen less frequently. By the end of the training, the ball is kep consistenyl in the middle of the tray.}
+\end{figure}
+Figure 3 shows that convergence happens at about 30000 time steps. The training was re-run with the number of iterations as 30000. Figure 4 shows the output. As can be seen, the perfornace was not good and the system did not learn. This is most likely because the exploration rate is linked to the number of iterations, so the reduction of exploration rate will happen faster if there are fewer iterations. Plus, 30000 was only just when the agent learnt the bahaviour, learning still continued past this and solidified the behaviour.
+\begin{figure}[H]
+	\includegraphics{154_small}
+	\caption{The position of the ball over a shorter training session. Performance was worse and the agent did not get a chance to learn the correct behaviour. The x axis goes up to 35000 because of the extra 5000 iterations that do not involve learning.}
+\end{figure}
+\begin{table}[htb]
+\centering
+\caption{FINAL Q-LEARNING PARAMETERS}
+\vspace*{6pt}
+\label{q_params}
+\begin{tabular}{>{\raggedright}p{0.4\linewidth}p{0.2\linewidth}}\hline
+Parameter & Refined Value\\ \hline\hline
+Initial exploration rate & 0.5\\ \hline
+Exploration rate reduction frequency & 20\\ \hline
+Exploration rate reduction value & 33.3\% \\\hline
+Learn rate & 0.4 \\\hline
+Discount factor & 0.9 \\\hline
 \end{tabular}
 \end{table}
 
-\subsection{References}
 
-The list of cited references should appear at the end of the report, ordered alphabetically by the surnames of the first authors.  The default style for references cited in the main text is the  Harvard (author, date) format.  When citing a section in a book, please give the relevant page numbers, as in \cite[p293]{budgen}.  When citing, where there are either one or two authors, use the names, but if there are more than two, give the first one and use ``et al.'' as in  , except where this would be ambiguous, in which case use all author names.
-
-You need to give all authors' names in each reference.  Do not use ``et al.'' unless there are more than five authors.  Papers that have not been published should be cited as ``unpublished'' \cite{euther}.  Papers that have been submitted or accepted for publication should be cited as ``submitted for publication'' as in \cite{futher} .  You can also cite using just the year when the author's name appears in the text, as in ``but according to Futher \citeyear{futher}, we \dots''.  Where an authors has more than one publication in a year, add `a', `b' etc. after the year.\cite{rl_survey}
-
-
+\subsection{Specific Reward Q-learning in Simulation}
+SHOW HOW IT POERFORMS IN SIMULATION
+\subsection{General Reward Q-learning in Simulation}
+SHOW HOW IT POERFORMS IN SIMULATION
+\subsection{Specific Reward Q-learning with Robot}
+\subsection{General Reward Q-learning with Robot}
+\subsection{Refined Q-learning in Simulation}
+\subsection{Refined Q-learning with Robot}
+\section{Evaluation}
+\section{Conclusion}
 
 
 \bibliography{projectpaper}
