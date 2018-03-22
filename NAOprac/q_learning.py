@@ -12,6 +12,11 @@ import numpy as np
 import math
 import copy
 import time
+import os
+import json
+import matplotlib.pyplot as plt
+
+from sklearn.model_selection import ParameterGrid
 
 import configparser
 
@@ -69,6 +74,7 @@ class BallBalancer:
         self.Q = np.zeros((self.num_bins_pos, self.num_bins_vel, self.num_bins_ang, self.num_actions))
         # self.Q.fill(0.5)
         self.q_freq = np.zeros((self.num_bins_pos, self.num_bins_vel, self.num_bins_ang))
+        self.data_records = []  # Stores the data about each step of the simulation. For use when displaying results
 
         self.curr_action = 0
         self.next_action = 0
@@ -105,6 +111,7 @@ class BallBalancer:
         self.trained = False
         self.prnt = False
         self.specific = False  # Whether to use a very specific reward, or a more general, simple one
+        self.er = False  # Whether experience replay is being done
 
         self.tray_has_ends = ends  # Whether to add ends to the tray
         self.num_end_touches = 0
@@ -387,7 +394,7 @@ class BallBalancer:
         #if random.random() < self.explore_rate:
         #    action = random.randint(0, self.num_actions-1)
 
-        return action
+        return int(action)  # int needed for json serialising
 
     def __change_state(self, a_bin, action):
         """
@@ -485,17 +492,6 @@ class BallBalancer:
         gap2 = 1
 
         if self.specific:  # A ver specific reward, refined after tinking what the best thing to do is in each situation
-            # if abs(self.curr_val_p) < (self.tray_width/2)/3:
-            #     reward += 0.5
-            # elif abs(self.curr_val_p) < (self.tray_width)/3:
-            #     reward += 0.2
-            # else:
-            #     reward -= 0.5
-
-            # if abs(self.prev_val_p) > abs(self.curr_val_p):
-            #     reward += 0.5
-            # else:
-            #     reward -= 0.2
             if (self.curr_val_v > 0 and self.curr_bin_a > self.prev_bin_a) or (self.curr_val_v < 0 and self.curr_bin_a < self.prev_bin_a):
                 reward += abs(self.tray_x_pos - self.curr_val_p)/self.tray_width
             elif (self.curr_val_v > 0 and abs(self.curr_val_v) < self.max_vel*0.01 and self.curr_val_p > self.tray_x_pos) or (self.curr_val_v < 0 and abs(self.curr_val_v) < self.max_vel*0.01 and self.curr_val_p < self.tray_x_pos):
@@ -681,6 +677,53 @@ class BallBalancer:
             np.savez(self.file_location, q=q, metadata=metadata)
             print("Saved as:", self.file_location)
 
+    def record_current_state(self):
+        state_data = {
+            # "iterations": self.iterations,
+            "pos": self.curr_val_p,
+            "vel": self.curr_val_v,
+            "ang": self.curr_val_a,
+            "act": self.curr_action,
+            # "pos_bin": self.curr_bin_p,  # Can work these out from actual value and some metadata
+            # "vel_bin": self.curr_bin_v,
+            # "ang_bin": self.curr_bin_a,
+            "frames_on_edge": self.num_end_touches / self.iterations
+        }
+        self.data_records.append(state_data)
+
+    def save_state_data(self, desc=""):
+        cwd = os.getcwd() + "\sim_data"  # Directory of where data is to be saved
+        dirs = os.listdir(cwd)  # List of files in that directory
+        number_files = len(dirs)  # Number of files
+        file_name = "sim_data\simulation_data_" + str(number_files) + ".json"
+        json_output = open(file_name, 'w')
+        json_data = {
+                        "metadata": [
+                            {
+                                "description": desc,
+                                "specific": self.specific,
+                                "exp_replay": self.er,
+                                "num_pos": self.num_bins_pos,
+                                "num_vel": self.num_bins_vel,
+                                "num_ang": self.num_bins_ang,
+                                "max_pos": self.max_pos,
+                                "max_vel": self.max_vel,
+                                "max_ang": self.max_ang,
+                                "num_iterations": self.num_iterations_original,
+                                "exp_rate": self.explore_rate_original,
+                                "exp_reduction_freq": self.explore_reduction_freq_original,
+                                "exp_reduction_scale": self.scale_reduction,
+                                "step_size": self.step_size,
+                                "sim_speed": self.sim_speed,
+                                "learn_rate": self.learn_rate,
+                                "discount_factor": self.discount_factor,
+                                "final_side_touches": self.num_end_touches / self.iterations
+                            }
+                        ],
+                        "data": self.data_records,
+        }
+        json.dump(json_data, json_output)
+
 
 def setup_q_trainer_old(p, v, a, ends=False, is_q_not_s=True):
     trainer = BallBalancer(p, v, a, ends, is_q_not_s)
@@ -700,8 +743,8 @@ def setup_q_trainer_old(p, v, a, ends=False, is_q_not_s=True):
 
 
 def setup_trainer(num_states_p, num_states_v, num_states_a,
-                  num_iterations, exp_rate=0.5, num_exp_reductions=10, val_exp_reduction=1.2,
-                  step_size=1, learn_rate=0.4, disc_fact=0.99, sim_speed=5):
+                  num_iterations, exp_rate=0.5, num_exp_reductions=20, val_exp_reduction=1.5,
+                  step_size=1, learn_rate=0.4, disc_fact=0.9, sim_speed=5):
     trainer = BallBalancer(num_states_p, num_states_v, num_states_a)  # Initialise the trainer object
     trainer.set_up_pygame()  # Set up pygame
     trainer.create_world()  # Create the world - the tray and joint
@@ -713,6 +756,9 @@ def setup_trainer(num_states_p, num_states_v, num_states_a,
     trainer.learn_rate = learn_rate  # The amount that the reward and future state affects the current states value
     trainer.discount_factor = disc_fact  # The proportion of the future state value that you keep. Bigger means you value future states more, smaller means only care about immediate states 
     trainer.sim_speed = sim_speed  # The amount to step the simulation by. 5 is default for pygame. Bigger makes simulation run faster.
+    trainer.explore_rate_original = exp_rate
+    trainer.num_iterations_original = num_iterations
+    trainer.explore_reduction_freq_original = num_iterations / num_exp_reductions
     return trainer
 
 
@@ -796,12 +842,12 @@ def do_experience_replay(trainer, iter, show=False, prnt=False):
 
 def display_simulation(trainer):
     """
-    Runs the simulation and siaplays what goes on. No training is done
+    Runs the simulation and displays what goes on. No training is done
     """
     trainer.explore_rate = 0  # Because we want to do the decision thought best by the Q matrix
     trainer.reset_draw()  # Refreshes the drawing canvas. Can error if not.
     trainer.prnt = True  # Print some information to the console 
-
+    trainer.trained = True
     running = True  # Whether to continue running the sinulation
     while running:
         running = trainer.continue_running()  # Check if it is to continue. Usually halted by a key press
@@ -822,20 +868,36 @@ def train_q_specific(trainer):
         trainer.touched_in_this_iteration = False  # Reset the fact that the ball is not touching a wall
 
 
-def train_q_general(trainer):
+def train_q(trainer, specific=False, er=False):
     """
     Do Q-learning training with a general reward.
     A general reward means there is a good set of states, determined by position
     and velocity of the ball. Receives a positive reward if ball is in these states.
     Receives a negative reward if not
+    If specific is True, then use a more specific reward refined after tinking what
+    the best thing to do is in each situation
+    If er is True, then train from the experiences recorded from the robot
     """
-    running = True
-    while trainer.iterations < trainer.max_num_iterations and running:
-        trainer.perform_episode()  # Carry out the next step of the simulation
-        trainer.reduce_explore_rate()  # Check if the explore rate is to be reduced, and do so if it is
-        running = trainer.continue_running()  # Check whether to continue running the simulation
-        trainer.iterations += 1  # increase the number of iterations by 1
-        trainer.touched_in_this_iteration = False  # Reset the fact that the ball is not touching a wall
+    trainer.specific = specific
+    trainer.er = er
+    if er:
+        trainer.load_er_mat()  # Load the ER matrix from file. This stores all the experiences in a matrix that can be indexed by pos, vel and ang
+        for i in range(1, trainer.max_num_iterations):
+            trainer.iterations = i
+            if i % 1000 == 0:
+                print(i)
+            trainer.perform_episode_er()
+            trainer.record_current_state()
+    else:
+        running = True
+        while trainer.iterations < trainer.max_num_iterations and running:
+            trainer.perform_episode()  # Carry out the next step of the simulation
+            trainer.reduce_explore_rate()  # Check if the explore rate is to be reduced, and do so if it is
+            running = trainer.continue_running()  # Check whether to continue running the simulation
+            trainer.touched_in_this_iteration = False  # Reset the fact that the ball is not touching a wall
+            trainer.record_current_state()
+            trainer.iterations += 1  # increase the number of iterations by 1
+
 
 
 def train_q_general_robot(trainer):
@@ -866,24 +928,130 @@ def train_q_experience_replay(trainer):
 # General reward QL
 # 100000 iterations works very well, basically perfect
 # tr = setup_trainer(12, 12, 10, 100000)
-# train_q_general(tr)
+# train_q(tr)
 # display_simulation(tr)
+# tr.save_state_data()
 
 # Genral reward robot like QL
 # 100000 iterations, steps_size and sim_speed 10 works very well
 # tr = setup_trainer(12, 12, 10, 100000, step_size=10, sim_speed=10)
-# train_q_general(tr)
+# train_q(tr)
 # display_simulation(tr)
 
 # Expereince replay with general reward
 # 5000000 iters, ss and ss 10 works okish. Quite similar to the robot. Better without sss
 # tr = setup_trainer(12, 12, 10, 5000000)#, step_size=10, sim_speed=10)
-# train_q_experience_replay(tr)
+# train_q(tr, er=True)
 # display_simulation(tr)
 
 # Specific reward QL
 # 100000 iterations works well. Is very reactive to changing direction, but not so good at gettin into middle
 # Very interestingly, with step_size and sim_speed at 10, side toughing freq initially goes up, but eventually comes back down and it finishes doing ok 
 # tr = setup_trainer(12, 12, 10, 100000)  # , step_size=10, sim_speed=10)
-# train_q_specific(tr)
+# train_q(tr, specific=True)
 # display_simulation(tr)
+
+
+def plot_position_against_time(i, end=True):
+    data_file = open("sim_data/simulation_data_" + str(i) + ".json", 'r')
+    data_json = json.load(data_file)
+    data = data_json["data"]
+    metadata = data_json["metadata"]
+    x_time = []
+    y_pos = []
+    #plt.title(metadata[0]["description"])
+    font = {"fontname":"Times New Roman"}
+    plt.xlabel("Iterations", font)
+    plt.ylabel("Ball position", font)
+    ax = plt.gca()
+    for tick in ax.get_xticklabels():
+        tick.set_fontname("Times New Roman")
+    for tick in ax.get_yticklabels():
+        tick.set_fontname("Times New Roman")
+    if end:
+        for idx in range(len(data)-5000, len(data)):
+            x_time.append(idx)
+            y_pos.append(data[idx]["pos"])
+    else:
+        for idx in range(0, len(data)):
+            x_time.append(idx)
+            y_pos.append(data[idx]["pos"])
+    axs = plt.gca()
+    axs.set_ylim([-125, 125])
+    plt.plot(x_time, y_pos)
+    
+    plt.show(1)
+
+df = [0.99, 0.9, 0.5]
+er = [0.5, 0.2]
+
+param_grid = {
+    #"initial_er":[0.5, 0.2, 0.1], 
+    #"num_er":[5, 10, 20],
+    #"er_reduction_val":[1.2, 1.5, 2],
+    #"lr": [0.4, 0.5],
+    #"df": [0.9, 0.8]
+    #"not_testing_parameters":[0]
+    "specific": [True, False]
+    }
+pg = list(ParameterGrid(param_grid))
+if False:
+    for i in pg:
+        print(i)
+        tr = setup_trainer(12, 12, 10, 50000)
+        train_q(tr, i["specific"])
+        tr.explore_rate = 0
+        tr.trained = True
+        tr.iterations = 1
+        tr.max_num_iterations = 5000  # Do 5000 more - MAYBE SEE WHAT HAPPENS FOR EVEN LONGER
+        train_q(tr, i["specific"])
+        tr.save_state_data("A trial for general/specific reward" + str(i))
+else:
+    for i in range(155,159):
+        print(i)
+        plot_position_against_time(i, end=False)
+
+if False:
+    tr = setup_trainer(12, 12, 10, 50000, exp_rate=0.5, num_exp_reductions=20, val_exp_reduction=1.5)
+    train_q(tr)
+    display_simulation(tr)
+# for i in df:
+#     for j in er:
+#         k = "NA"
+#         #for k in lr:
+#         print("\n\ndf:", i, "er:", j, "lr:", k)
+#         tr = setup_trainer(12, 12, 10, 100000, disc_fact=i, exp_rate=j)
+#         train_q(tr)
+#         tr.save_state_data("A trial for df, er, lr with df=" +str(i) + ", er=" + str(j) + ", lr=" + str(k))
+
+
+# tr = setup_trainer(12, 12, 10, 100000)
+# train_q(tr)
+# display_simulation(tr)
+# tr.save_state_data("General reward, no delay")
+
+# tr = setup_trainer(12, 12, 10, 100000, step_size=10, sim_speed=10)
+# train_q(tr)
+# display_simulation(tr)
+# tr.save_state_data("General reward with delay")
+
+# tr = setup_trainer(12, 12, 10, 5000000)
+# train_q(tr, er=True)
+# display_simulation(tr)
+# tr.save_state_data("ER with no delay")
+
+# tr = setup_trainer(12, 12, 10, 5000000, step_size=10, sim_speed=10)
+# train_q(tr, er=True)
+# display_simulation(tr)
+# tr.save_state_data("ER with delay")
+
+# tr = setup_trainer(12, 12, 10, 100000)
+# train_q(tr, specific=True)
+# display_simulation(tr)
+# tr.save_state_data("Specific reward with no delay")
+
+# tr = setup_trainer(12, 12, 10, 100000, step_size=10, sim_speed=10)
+# train_q(tr, specific=True)
+# display_simulation(tr)
+# tr.save_state_data("Specific reward with delay")
+
