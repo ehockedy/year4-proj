@@ -112,6 +112,8 @@ class BallBalancer:
         self.prnt = False
         self.specific = False  # Whether to use a very specific reward, or a more general, simple one
         self.er = False  # Whether experience replay is being done
+        self.consensus = False
+        self.prev_iteration_num = 1  # Used for recording q_mat cell data
 
         self.tray_has_ends = ends  # Whether to add ends to the tray
         self.num_end_touches = 0
@@ -179,6 +181,7 @@ class BallBalancer:
         a = random.randint(0, num_angs)
         experience = self.er_mat[p][v][a][0]
         while len(experience) == 0:
+            #print(p, v, a)
 
             p = random.randint(0, self.num_bins_pos-1)
             v = random.randint(0, self.num_bins_vel-1)
@@ -194,7 +197,7 @@ class BallBalancer:
         self.curr_bin_p = p_new
         self.curr_bin_v = v_new
         reward = self.__calculate_reward()
-        # reward = exp["reward"]
+        #reward = exp["reward"]
         old_val = copy.copy(self.Q[p][v][a])
 
         if not self.no_angle:
@@ -380,6 +383,20 @@ class BallBalancer:
 
     def __choose_action(self, p_var, v_var, a_var):
         action = np.argmax(self.Q[p_var][v_var][a_var])
+
+        if self.consensus:
+            votes = [action]
+            if p_var > 0:
+                votes.append(np.argmax(self.Q[p_var-1][v_var][a_var]))
+            if p_var < self.num_bins_pos-1:
+                votes.append(np.argmax(self.Q[p_var+1][v_var][a_var]))
+            if v_var > 0:
+                votes.append(np.argmax(self.Q[p_var][v_var-1][a_var]))
+            if v_var < self.num_bins_vel-1:
+                votes.append(np.argmax(self.Q[p_var][v_var+1][a_var]))
+            action = max(set(votes), key=votes.count)
+            if self.iterations >= self.max_num_iterations:
+                print(votes, action)
         # if p_var >= 0 and v_var >= 0:
         if random.random() < self.explore_rate:
             while action == np.argmax(self.Q[p_var][v_var][a_var]):
@@ -439,6 +456,11 @@ class BallBalancer:
         self.trayBody.angular_velocity = 0  # To stop turning once turn has occured
 
         ppp, vvv, aaa = self.get_state(self.curr_val_p, self.curr_val_v, self.curr_val_a)
+
+        if self.trayBody.angle < self.min_ang:
+            self.trayBody.angle = self.min_ang
+        elif self.trayBody.angle > self.max_ang:
+            self.trayBody.angle = self.max_ang
 
         return ppp, vvv, aaa
 
@@ -691,6 +713,116 @@ class BallBalancer:
         }
         self.data_records.append(state_data)
 
+    def record_current_q_cells(self):
+        """
+        Records the data on how Q matrix cells change over time
+        """
+        store = {}
+        if len(self.cell_data_store) > 0:
+            prev_data_store = self.cell_data_store[self.prev_iteration_num]  # Get the most recent cell store
+            update = False  # Whether to store the data for this iteration
+            for c in range(0, len(self.cell_data)):  # For each cell we are recording data about
+                cell = self.cell_data[str(c+1)]  # Get the cell state info
+                p = cell["p"]
+                v = cell["v"]
+                a = cell["a"]
+                store[c+1] = {
+                                0 : copy.copy(self.Q[p][v][a][0]), 
+                                1 : copy.copy(self.Q[p][v][a][1])
+                            }
+                if not np.array_equal(prev_data_store[c+1], store[c+1]):
+                    update = True  # Only record the new store if one of the cells is different - save storing reundant data
+            
+            if update:  # Add the data to the list of stored bits of data
+                self.cell_data_store[self.iterations] = store
+                self.prev_iteration_num = copy.copy(self.iterations)
+                print(self.iterations, store)
+
+    def generate_cell_data(self):
+        """
+        Generates the data about the Q matrix cells to record
+        This is where you choose which cells to watch
+        """
+        self.cell_data_store = {}
+        self.cell_data =  {
+                                "1":
+                                    {
+                                        'p': 11,
+                                        'v': 6,
+                                        'a': 0
+                                    },
+                                "2":
+                                    {
+                                        'p': 6,
+                                        'v': 6,
+                                        'a': 5
+                                    },
+                                "3":
+                                    {
+                                        'p': 10,
+                                        'v': 7,
+                                        'a': 1
+                                    },
+                                "4":
+                                    {
+                                        'p': 2,
+                                        'v': 3,
+                                        'a': 3
+                                    },
+                                "5":
+                                    {
+                                        'p': 4,
+                                        'v': 2,
+                                        'a': 7
+                                    }
+                            }
+        store = {}
+        for c in range(0, len(self.cell_data)):
+            cell = self.cell_data[str(c+1)]
+            p = cell["p"]
+            v = cell["v"]
+            a = cell["a"]
+            store[c+1] = {
+                            0 : copy.copy(self.Q[p][v][a][0]), 
+                            1 : copy.copy(self.Q[p][v][a][1])
+                        }
+        self.cell_data_store[self.iterations] = store
+
+    def save_q_cell_data(self, desc=""):
+        cwd = os.getcwd() + "\sim_data"  # Directory of simulation data - do this so matches up with the graphs
+        dirs = os.listdir(cwd)  # List of files in that directory
+        number_files = len(dirs)-1  # Number of files. -1 because the new position data has already been plotted
+        file_name = "q_cell_data\q_cell_data_" + str(number_files) + ".json"
+        json_output = open(file_name, 'w')
+        json_data = {
+                        "metadata": [
+                            {
+                                "description": desc,
+                                "specific": self.specific,
+                                "exp_replay": self.er,
+                                "num_pos": self.num_bins_pos,
+                                "num_vel": self.num_bins_vel,
+                                "num_ang": self.num_bins_ang,
+                                "max_pos": self.max_pos,
+                                "max_vel": self.max_vel,
+                                "max_ang": self.max_ang,
+                                "num_iterations": self.num_iterations_original,
+                                "exp_rate": self.explore_rate_original,
+                                "exp_reduction_freq": self.explore_reduction_freq_original,
+                                "exp_reduction_scale": self.scale_reduction,
+                                "step_size": self.step_size,
+                                "sim_speed": self.sim_speed,
+                                "learn_rate": self.learn_rate,
+                                "discount_factor": self.discount_factor,
+                                "final_side_touches": self.num_end_touches / self.iterations
+                            }
+                        ],
+                        "cell_data": self.cell_data,
+                        "data": self.cell_data_store,
+        }
+        print(self.cell_data, "\n\n", self.cell_data_store)
+        json.dump(json_data, json_output)
+
     def save_state_data(self, desc=""):
         cwd = os.getcwd() + "\sim_data"  # Directory of where data is to be saved
         dirs = os.listdir(cwd)  # List of files in that directory
@@ -852,6 +984,10 @@ def display_simulation(trainer):
     while running:
         running = trainer.continue_running()  # Check if it is to continue. Usually halted by a key press
         trainer.perform_episode()  # Carry out the next step of the simulation
+        p = trainer.curr_bin_p
+        v = trainer.curr_bin_v
+        a = trainer.curr_bin_a
+        print(p, v, a, trainer.Q[p][v][a])
 
 
 def train_q_specific(trainer):
@@ -881,13 +1017,14 @@ def train_q(trainer, specific=False, er=False):
     trainer.specific = specific
     trainer.er = er
     if er:
-        trainer.load_er_mat()  # Load the ER matrix from file. This stores all the experiences in a matrix that can be indexed by pos, vel and ang
+        trainer.load_er_mat()  # Load the ER matrix from file. This holds all the experiences in a matrix that can be indexed by pos, vel and ang
         for i in range(1, trainer.max_num_iterations):
             trainer.iterations = i
-            if i % 1000 == 0:
+            if i % 10000 == 0:
                 print(i)
             trainer.perform_episode_er()
             trainer.record_current_state()
+            trainer.record_current_q_cells()
     else:
         running = True
         while trainer.iterations < trainer.max_num_iterations and running:
@@ -952,7 +1089,62 @@ def train_q_experience_replay(trainer):
 # display_simulation(tr)
 
 
-def plot_position_against_time(i, end=True):
+def plot_change_of_q_cells(i=""):
+    if i == "":  # Do most recent by default
+        cwd = os.getcwd() + "\sim_data"  # Directory of simulation data - do this so matches up with the graphs
+        dirs = os.listdir(cwd)  # List of files in that directory
+        i = len(dirs)-1  # Number of files
+    print(i)
+    data_file = open("q_cell_data/q_cell_data_" + str(i) + ".json", 'r')
+    data_json = json.load(data_file)
+    data = data_json["data"]
+    cell_data = data_json["cell_data"]
+    metadata = data_json["metadata"][0]
+    
+    #plt.title(metadata[0]["description"])
+    font = {"fontname":"Times New Roman"}
+    plt.xlabel("Iterations", font)
+    plt.ylabel("Q-value", font)
+    ax = plt.gca()  # Get current axes
+    for tick in ax.get_xticklabels():
+        tick.set_fontname("Times New Roman")
+    for tick in ax.get_yticklabels():
+        tick.set_fontname("Times New Roman")
+
+    axs = plt.gca()
+    axs.set_ylim([-8, 8])
+    colours = ['royalblue', 'darkorange', 'limegreen', 'tomato', 'gold']
+
+    leg_obj = []
+    leg_label = []
+
+    current_vals = data['1']
+    for cell in range(1, len(cell_data)+1):  # +1 because cell index starts at 1
+        c = str(cell)
+        x_time = []
+        y_val_1 = []
+        y_val_2 = []
+        for idx in range(1, int(metadata["num_iterations"])):
+            if str(idx) in data:
+                current_vals = data[str(idx)]
+            x_time.append(idx)
+            y_val_1.append(current_vals[c]['0'])
+            y_val_2.append(current_vals[c]['1'])
+        state_string = str(cell_data[c]['p']) + ', ' + str(cell_data[c]['v']) + ', ' + str(cell_data[c]['a']) + ', '
+        a, = plt.plot(x_time, y_val_1, colours[cell-1])#, label=state_string + 'clockwise')
+        b, = plt.plot(x_time, y_val_2, colours[cell-1], linestyle='--')#, label=state_string+'anticlockwise')
+        leg_obj.append(a)
+        leg_obj.append(b)
+        leg_label.append(state_string + 'clockwise')
+        leg_label.append(state_string + 'anticlockwise')
+    plt.legend(leg_obj, leg_label)
+    plt.show(1)
+
+def plot_position_against_time(i="", end=True):
+    if i == "":  # Do most recent by default
+        cwd = os.getcwd() + "\sim_data"  # Directory of simulation data - do this so matches up with the graphs
+        dirs = os.listdir(cwd)  # List of files in that directory
+        i = len(dirs)-1  # Number of files
     data_file = open("sim_data/simulation_data_" + str(i) + ".json", 'r')
     data_json = json.load(data_file)
     data = data_json["data"]
@@ -989,32 +1181,61 @@ param_grid = {
     #"initial_er":[0.5, 0.2, 0.1], 
     #"num_er":[5, 10, 20],
     #"er_reduction_val":[1.2, 1.5, 2],
-    #"lr": [0.4, 0.5],
-    #"df": [0.9, 0.8]
-    #"not_testing_parameters":[0]
-    "specific": [True, False]
+    #"lr": [0.4, 0.5, 0.1],
+    #"df": [0.9, 0.8, 0.5]
+    "not_testing_parameters":[0]
+    #"specific": [True, False]
     }
 pg = list(ParameterGrid(param_grid))
-if False:
+if True:
     for i in pg:
         print(i)
-        tr = setup_trainer(12, 12, 10, 50000)
-        train_q(tr, i["specific"])
-        tr.explore_rate = 0
-        tr.trained = True
+        tr = setup_trainer(12, 12, 10, 50000)#, step_size=10, sim_speed=10)#, learn_rate=i["lr"], disc_fact=i["df"])
+
+        tr.generate_cell_data()
+        #tr.explore_rate = i["initial_er"]
+        #tr.scale_reduction = i["er_reduction_val"]
+        #tr.consensus = False
+        #train_q(tr, er=False)
+
         tr.iterations = 1
+        tr.max_num_iterations = 500000
+        train_q(tr, er=True)
+    
+        tr.trained = True
+        tr.explore_rate = 0
+        tr.iterations = 1
+        #tr.consensus = True
         tr.max_num_iterations = 5000  # Do 5000 more - MAYBE SEE WHAT HAPPENS FOR EVEN LONGER
-        train_q(tr, i["specific"])
-        tr.save_state_data("A trial for general/specific reward" + str(i))
-else:
-    for i in range(155,159):
-        print(i)
-        plot_position_against_time(i, end=False)
+        train_q(tr, er=False)
+        tr.save_state_data("A trial experience replay" + str(i))
+        tr.save_q_cell_data("TEST")
+        display_simulation(tr)
+        plot_change_of_q_cells()
 
 if False:
-    tr = setup_trainer(12, 12, 10, 50000, exp_rate=0.5, num_exp_reductions=20, val_exp_reduction=1.5)
-    train_q(tr)
+    tr = setup_trainer(12, 12, 10, 100000, step_size=10, sim_speed=10, exp_rate=0.5, num_exp_reductions=20, val_exp_reduction=1.33, disc_fact=0.9, learn_rate=0.4)
+    train_q(tr, er=True)
     display_simulation(tr)
+    tr.save_state_data("General reward with delay")
+
+
+if True:
+    plot_position_against_time(end=True)
+    plot_position_against_time(end=False)
+
+#168 - 194 = testing explore rate things
+#195 - 203 = testing df and lr
+if False:
+    for i in range(274, 275):
+        print(i)
+        plot_position_against_time(i, end=True)
+        plot_position_against_time(i, end=False)
+
+
+
+
+
 # for i in df:
 #     for j in er:
 #         k = "NA"
@@ -1030,7 +1251,7 @@ if False:
 # display_simulation(tr)
 # tr.save_state_data("General reward, no delay")
 
-# tr = setup_trainer(12, 12, 10, 100000, step_size=10, sim_speed=10)
+# tr = setup_trainer(12, 12, 10, 50000, step_size=10, sim_speed=10)
 # train_q(tr)
 # display_simulation(tr)
 # tr.save_state_data("General reward with delay")
@@ -1054,4 +1275,3 @@ if False:
 # train_q(tr, specific=True)
 # display_simulation(tr)
 # tr.save_state_data("Specific reward with delay")
-
