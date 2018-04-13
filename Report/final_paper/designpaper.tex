@@ -6,6 +6,7 @@
 \usepackage{algpseudocode}
 \usepackage{array}
 \usepackage{graphicx}
+\usepackage{subfig}
 \graphicspath{ {images/}}
 
 
@@ -166,11 +167,11 @@ The first stage in achieving the best performance from the Q-learning was to fin
 \caption{Q-learning parameters}
 \vspace*{6pt}
 \label{q_params}
-\begin{tabular}{>{\raggedright}p{0.21\linewidth}p{0.5\linewidth}p{0.1\linewidth}}\hline
+\begin{tabular}{>{\raggedright}p{0.2\linewidth}p{0.55\linewidth}p{0.17\linewidth}}\hline
 Parameter & Description& Tested Values\\ \hline\hline
 Initial exploration rate & The starting probability of taking a different action to the one though to be the optimal & 0.2, 0.5, 1\\ \hline
 Exploration rate reduction frequency & The number of times the exploration rate is reduced & 5, 10, 20\\ \hline
-Exploration rate reduction value & The amount to reduce the exploration rate by & 10\%, 20\%, 33.3\%, 50\% \\\hline
+Exploration rate reduction value & The percentage to reduce the exploration rate by & 10, 20, 33.3, 50 \\\hline
 Learn rate & The proportion the updated value in the Q-matrix is made up from learnt information compared to existing information & 0.1, 0.4, 0.5,  0.7 \\\hline
 Discount factor & The influence future rewards have on updating the value for the current state and action & 0.5, 0.8, 0.9, 0.99 \\\hline
 \end{tabular}
@@ -231,11 +232,11 @@ Discount factor & 0.9 \\\hline
 For the parameter tuning, the reward used was the general reward. Figure \ref{f5} shows the performance of the trainer as it learns with the specific reward function over 50000 iterations. It appears to converge faster than the more general reward - convergence happens after about 20000 steps. However, the position on the tray that it keeps the ball is quite off centre. This can be considered balanced, but to give it maximum chance to keep balanced in the case of sudden movement, a central position is preferred. A specific reward likely gives this result as it is focussed on bringing the ball to a stop as soon as possible, and works to counteract any movement that may accelerate the ball. As such, it gets stuck wherever it is and never allows the ball to accelerate even a small amount to the centre of the tray since there is no consideration of future actions. TALK ABOUT THE BIT TO RE CENTRE IT
 
 \subsection{Neural Network in Simulation}
-To find the best neural network with the shortest training time, the parameters shown in table \ref{nn_params} were tested. Results showed that all combinations except for the (2) structure (single layer with two neurons) and 50 training epochs worked sufficiently. By comparing the graphs of the ball position over time for the trained network, as well as the time to train, the best structure was decided to be (2, 2). Other structures worked similarly well but the smaller structure meant shorter training time and less chance of overfitting. The number of epochs chosen to be best was 100 as it was enough to train sufficiently, did not take too long, and is less likely to cause overfitting compared to the larger number of epochs. Figure \ref{nn_param_test} shows the position over time for the trained network of chosen size. It balances the ball very well.
+To find the best neural network with the shortest training time, the parameters shown in table \ref{nn_params} were tested. The struture format is given as the number of neurons for each layer, so (x, y) has x neurons in the first layer and y neurons in the second layer. Th number of epochs is the number of times the trainer goes through the entire data set. Results showed that all combinations except for the (2) structure (single layer with two neurons) and 50 training epochs worked sufficiently. By comparing the graphs of the ball position over time for the trained network, as well as the time to train, the best structure was decided to be (2, 2). Other structures worked similarly well but the smaller structure meant shorter training time and less chance of overfitting. The number of epochs chosen to be best was 100 as it was enough to train sufficiently, did not take too long, and is less likely to cause overfitting compared to the larger number of epochs. Figure \ref{nn_param_test} shows the position over time for the trained network of chosen size. It balances the ball very well.
 %from about 60 to 92 are the tests for nn params
 \begin{table}[htb]
 \centering
-\caption{Neural network parameters}
+\caption{Neural network parameters. The best structure was (2, 2), best number of epochs was 100.}
 \label{nn_params}
 \begin{tabular}{>{\raggedright}p{0.3\linewidth}p{0.4\linewidth}}\hline
 Parameter & Tested values\\ \hline\hline
@@ -250,11 +251,27 @@ Number of training epochs & 50, 100, 150, 200\\ \hline
 	\label{nn_param_test}
 \end{figure}
 
-\subsection{Neural Network with Robot}
 \subsection{Specific Reward Q-learning with Robot}
 \subsection{General Reward Q-learning with Robot}
+Performance was not good with the robot. As seen in figure \ref{q_nao}, the ball hits the sides of the tray numerous times. There are some instances of getting the ball under control when it is in the middle of the tray, as seen by the changes of direction around the center of the y-axis. Control of the ball is always lost straight away.
+\begin{figure}[H]
+	\centering
+    \subfloat[Instance 1]{{\includegraphics[width=8.5cm]{0_nao_q} }}%
+    \subfloat[Instance 2]{{\includegraphics[width=8.5cm]{1_nao_q} }}%
+	\caption{Two instances of the ball balancing on the tray with the robot in control. Actions are decided by the trained Q-matrix. Two different cases were shown since performance on the robot could vary quite a lot.}
+	\label{q_nao}
+\end{figure}
+\subsection{Neural Network with Robot}
+Performance of the balancing behaviour on the robot was worse than in simulation. The performance was not bad enough to be considered a failure however. Figure \ref{nn_nao} shows the ball position changing over time on the robot. In both cases it does touch the end a few times, but the behaviour does mirror the behaviour in smulation. That is, as the ball approaches the end of the tray, the tray tilts to oppose the movement and the ball rolls in the opposite direction. most of the changes in direction keep the ball away from the sides of the tray. This is evident from the changes of direction in both graphs in figure \ref{nn_nao}.
+\begin{figure}[H]
+	\centering
+    \subfloat[Instance 1]{{\includegraphics[width=8.5cm]{8_nn_nao} }}%
+    \subfloat[Instance 2]{{\includegraphics[width=8.5cm]{9_nn_nao} }}%
+	\caption{Two instances of the ball balancing on the tray with the robot in control. Actions are decided by the trained neural network. Two different cases were shown since performance on the robot could vary quite a lot.}
+	\label{nn_nao}
+\end{figure}
 \subsection{Refined Q-learning in Simulation}
-The first refinement technique to be tested was the inclusion od a delay between actions, and an increase in the speed of the ball in the simulation. The delayed actions help mimic the robot because the robot can take actions less frequently than the simulation. THis is because of the time taken for the robot to execute an action, as well as the frequency of obtaining state information. The increased ball speed in the simulation more accurately represents the speed of the ball in the real world. The original variance in ball speed between robot and simulation could be down to a range of factors including friction between the ball and tray and weight of the ball.
+The first refinement technique to be tested was the inclusion of a delay between actions, and an increase in the speed of the ball in the simulation. The delayed actions help mimic the robot because the robot can take actions less frequently than the simulation. THis is because of the time taken for the robot to execute an action, as well as the frequency of obtaining state information. The increased ball speed in the simulation more accurately represents the speed of the ball in the real world. The original variance in ball speed between robot and simulation could be down to a range of factors including friction between the ball and tray and weight of the ball.
 
 The same parameter refinement as the original simulation was carried out in case the results differed. It was found that most of the best parameters from the original simulation were still the best parameters. The only difference was exploration rate reduction value, where a value of 50\% reduction was found to be marginally better than 33\%, but only by observation of the graphs after the few tests run for each set of parameters. The difference in performance was minimal.
 
@@ -315,6 +332,7 @@ Questions
 - Do all definitions need a reference (/should they, or can I do own definition like supervised learning in intro?)
 - Do I need to even explain neural network?
 - Is it suitable to just say these parameters were best, or do need to show comparison data?
+- Is results lterally just results, or do I also say "i think this is because..."
 
 To review:
 - Doing 2 or 3 actions?
