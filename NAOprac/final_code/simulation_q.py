@@ -46,7 +46,7 @@ class BallBalancer:
         self.max_ang = 0.1  # float(config["nao_params"]["left_angle_max"])
         self.min_ang = -0.1  # float(config["nao_params"]["right_angle_max"])
 
-        self.q_mats_path = str(config["trained_models_paths"])
+        self.q_mats_path = config["trained_models_paths"]["q_mats"]
         self.file_location = self.q_mats_path+"/q_" + str(self.num_bins_pos) + "_" + str(self.num_bins_vel) + "_" + str(self.num_bins_ang) + "_" + str(self.num_actions)
         self.file_location_delay = self.q_mats_path+"/q_DELAY_" + str(self.num_bins_pos) + "_" + str(self.num_bins_vel) + "_" + str(self.num_bins_ang) + "_" + str(self.num_actions)
         self.file_location_er = self.q_mats_path+"/q_er_" + str(self.num_bins_pos) + "_" + str(self.num_bins_vel) + "_" + str(self.num_bins_ang) + "_" + str(self.num_actions)
@@ -57,6 +57,7 @@ class BallBalancer:
         # self.Q.fill(0.5)
         self.q_freq = np.zeros((self.num_bins_pos, self.num_bins_vel, self.num_bins_ang))
         self.data_records = []  # Stores the data about each step of the simulation. For use when displaying results
+        self.record_cells = False
 
         self.curr_action = 0
         self.next_action = 0
@@ -131,7 +132,7 @@ class BallBalancer:
                 reward = self.__calculate_reward()
                 self.reward = reward
                 old_val = copy.copy(self.Q[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a])
-                if self.q_learn and not self.no_angle:
+                if self.q_learn:
                     self.Q[self.prev_bin_p][self.prev_bin_v][self.prev_bin_a][self.curr_action] = \
                         ((1-self.learn_rate) * old_val[self.curr_action]) + self.learn_rate * (reward + self.discount_factor * max(self.Q[self.curr_bin_p][self.curr_bin_v][self.curr_bin_a]))
                 elif self.no_angle:
@@ -191,10 +192,10 @@ class BallBalancer:
                 self.Q[p][v][a_idx][action] = \
                    ((1-self.learn_rate) * old_val[action]) + self.learn_rate * (reward + self.discount_factor * max(self.Q[p_new][v_new][a_idx]))
 
-        if p == 6 and v == 6 and a == 5:
-            print("Old:", p, v, a, ", New:", p_new, v_new, a_new,
-                    "\nAction:", action, ", Reward:", reward, " Old:", old_val[action], ", Extra:", self.learn_rate * (reward + self.discount_factor * max(self.Q[p_new][v_new][a_new])),
-                    "\nQ_old:", old_val, ", Q_new:", self.Q[p][v][a], ", Q_future:", self.Q[p_new][v_new][a_new], "\n\n")
+        #if p == 6 and v == 6 and a == 5:
+        #    print("Old:", p, v, a, ", New:", p_new, v_new, a_new,
+        #            "\nAction:", action, ", Reward:", reward, " Old:", old_val[action], ", Extra:", self.learn_rate * (reward + self.discount_factor * max(self.Q[p_new][v_new][a_new])),
+        #            "\nQ_old:", old_val, ", Q_new:", self.Q[p][v][a], ", Q_future:", self.Q[p_new][v_new][a_new], "\n\n")
 
     def update_state_from_er(self, new_state):
         """
@@ -229,7 +230,7 @@ class BallBalancer:
         return val_p, val_v, val_a
 
     def load_er_mat(self):
-        data_from_file = np.load("nao_experiences/nao_exp_" + str(self.num_bins_pos) + "_" + str(self.num_bins_vel) + "_" + str(self.num_bins_ang) + "_" + str(self.num_actions) + ".npz")
+        data_from_file = np.load(config["other"]["q_experiences"] + "/nao_exp_" + str(self.num_bins_pos) + "_" + str(self.num_bins_vel) + "_" + str(self.num_bins_ang) + "_" + str(self.num_actions) + ".npz")
         self.er_mat = data_from_file["exp"]
 
     def set_up_pygame(self):
@@ -571,7 +572,10 @@ class BallBalancer:
                         "num_actions": self.num_actions,
                         "max_pos": self.max_pos,
                         "max_vel": self.max_vel,
-                        "max_ang": self.max_ang
+                        "max_ang": self.max_ang,
+                        "specific_reward": self.specific,
+                        "step_size": self.step_size,
+                        "sim_speed": self.sim_speed
                     }
 
         q = self.Q
@@ -673,12 +677,13 @@ class BallBalancer:
                             1 : copy.copy(self.Q[p][v][a][1])
                         }
         self.cell_data_store[self.iterations] = store
+        self.record_cells = True
 
     def save_q_cell_data(self, desc=""):
         cwd = os.getcwd() + "/" + config["evaluation_data_paths"]["sim_q"]  # "\..\sim_data"  # Directory of simulation data - do this so matches up with the graphs
         dirs = os.listdir(cwd)  # List of files in that directory
         number_files = len(dirs)-1  # Number of files. -1 because the new position data has already been plotted
-        file_name = config["evaluation_data_paths"]["q_cell"] + "/" config["data_file_prefix"]["q_cell"] + "_" + str(number_files) + ".json"  # ..\q_cell_data
+        file_name = config["evaluation_data_paths"]["q_cell"] + "/" + config["data_file_prefix"]["q_cell"] + "_" + str(number_files) + ".json"  # ..\q_cell_data
         json_output = open(file_name, 'w')
         json_data = {
                         "metadata": [
@@ -799,11 +804,12 @@ def train_q(trainer, specific=False, er=False):
         trainer.load_er_mat()  # Load the ER matrix from file. This holds all the experiences in a matrix that can be indexed by pos, vel and ang
         for i in range(1, trainer.max_num_iterations):
             trainer.iterations = i
-            if i % 10000 == 0:
+            if i % 5000 == 0:
                 print(i)
             trainer.perform_episode_er()
             trainer.record_current_state()
-            trainer.record_current_q_cells()
+            if trainer.record_cells:
+                trainer.record_current_q_cells()
     else:
         running = True
         while trainer.iterations < trainer.max_num_iterations and running:
@@ -813,6 +819,8 @@ def train_q(trainer, specific=False, er=False):
             trainer.touched_in_this_iteration = False  # Reset the fact that the ball is not touching a wall
             trainer.record_current_state()
             trainer.iterations += 1  # increase the number of iterations by 1
+            #if trainer.curr_bin_p == 10 and trainer.curr_bin_v == 5:# and trainer.curr_bin_a == 4:
+            #    print(trainer.Q[10][5][trainer.curr_bin_a], trainer.curr_bin_a)
 
 
 def run_after_trained(tr):

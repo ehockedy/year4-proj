@@ -379,7 +379,7 @@ max_pos = 200
 max_vel = 600
 
 
-def setup_nn(num_pos=10, num_vel=8, num_ang=10, max_pos=200, max_vel=600, max_ang=0.1):
+def setup_nn(num_pos=10, num_vel=8, num_ang=10, max_pos=200, max_vel=600, max_ang=0.1, nao_data=False):
     trainer = BallBalancer()
     trainer.set_up_pygame()
     trainer.create_world()
@@ -398,6 +398,10 @@ def setup_nn(num_pos=10, num_vel=8, num_ang=10, max_pos=200, max_vel=600, max_an
     bin_values = str(trainer.num_bins_pos) + "_" + str(trainer.num_bins_vel) + "_" + str(trainer.num_bins_ang)
     trainer.file_location_training_data = config["other"]["nn_train_data"] + "/training_data_" + bin_values + ".json"  # ../nn_training_data
     trainer.file_location_network = config["trained_models_paths"]["nn_nets"] + '/trained_nn.xml'
+
+    if nao_data:
+        trainer.file_location_training_data = config["other"]["nn_train_data"] + "/training_data_nao_" + bin_values + ".json"  # ../nn_training_data
+        trainer.file_location_network = config["trained_models_paths"]["nn_nets"] + '/trained_nn_nao.xml'
 
     return trainer
 
@@ -486,7 +490,7 @@ def generate_data_nn(trainer, append_q=True, save_q=False, pos_range=(-max_pos, 
 
 # NEURAL NETWORK
 # trainer is an instance of ball balancer
-def train_nn(trainer, structure=(2,), momentum=0.99, learningrate=0.001, train_time=200):
+def train_nn(trainer, structure=(2,), momentum=0.99, learningrate=0.001, train_time=200, is_nao_training_data=False):
     print("Loading training data from:", trainer.file_location_training_data)
     load_json = json.load(open(trainer.file_location_training_data, "r"))
     training_data = load_json["data"]
@@ -503,6 +507,8 @@ def train_nn(trainer, structure=(2,), momentum=0.99, learningrate=0.001, train_t
         in_pos = trainer.get_bin(i["pos"], metadata["max_pos"], metadata["num_pos"])
         in_vel = trainer.get_bin(i["vel"], metadata["max_vel"], metadata["num_vel"])
         in_ang = trainer.get_bin(i["ang"], metadata["max_ang"], metadata["num_ang"])
+        if is_nao_training_data:
+            in_ang = i["ang"]
         inp = [in_pos, in_vel, in_ang]
         out = [i["out1"], i["out2"], i["out3"]]
         ds.addSample(inp, out)
@@ -585,7 +591,7 @@ def evaluate_nn(trainer, number_of_trials=10, iteration_limit=200,
 
             if continue_this_ball == limit:
                 number_completed += 1
-
+            print(p, v, a, action, nn_out)
             trainer.record_current_state(float(p_val), float(v_val), float(a_val), int(action))  # Record values before changed to bin values
 
         trainer.remove_ball()

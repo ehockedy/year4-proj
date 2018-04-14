@@ -63,5 +63,5 @@ def plot_position_against_time(path_key, yrange, i="", sf=1, end=False,
 
     plt.show(1)
 
-
-plot_position_against_time("nao_q", 0.15, end=False)  # , sf=115/200)
+for i in range(31, 33):
+    plot_position_against_time("nao_q", 0.15, i,end=False)  # , sf=115/200)
