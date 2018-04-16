@@ -7,6 +7,8 @@
 \usepackage{array}
 \usepackage{graphicx}
 \usepackage{subfig}
+\usepackage{array}
+\newcolumntype{P}[1]{>{\centering\arraybackslash}p{#1}}
 \graphicspath{ {images/}}
 
 
@@ -26,13 +28,25 @@
 \maketitle
 
 \begin{abstract}
-These instructions give you guidelines for preparing the design paper.  DO NOT change any settings, such as margins and font sizes.  Just use this as a template and modify the contents into your design paper.  Do not cite references in the abstract.
+\subsection{Context}
+Machine learning allows robots to learn behaviour when it is difficult to describe how to realise that behaviour. Balancing a ball on a tray is an example of such a task. A problem with robots is that training can take a long time, often requiring human supervision. Simulation provides a way to speed up the training process. 
 
-The abstract must be a Structured Abstract with the headings {\bf Context/Background}, {\bf Aims}, {\bf Method}, and {\bf Proposed Solution}.  This section should not be no longer than a page, and having no more than two or three sentences under each heading is advised.
+\subsection{Aims}
+The main aim it to train a robot to keep a ball balanced on a tray by tilting the tray as the ball moves. To achieve this, different machine learning techniques of Q-learning and a neural network are explored. Behaviour is first learnt in a simulation of the ball and tray. The suitability of porting the simulated behaviour to the robot is investigated.
+
+\subsection{Method}
+A simulation is used to train the Q-matrix. Data from a user is generated in the simulation to train the neural network. The learnt behaviour is tested the robot. Performance is evaluated by observing the position of the ball over time. Attempts to refine the simulated learning are made by adding delay to emulate the robots speed at making movements. Experience replay is also used to imitate actions made by the robot more closely than the simulator can.
+
+\subsection{Proposed Solution}
+A simulator that can learn to balance a ball on a tray. The leanrt behaviour can then be given to a Nao robot holding a tray, which can track a ball and attempt to keep the ball balanced in the centre of the tray. 
+
+\subsection{Results}
+The behaviour learnt in simulation is near perfect. When transferred to the robot, performance is adequate but not good. The refinements made make performance equal or worse. The level of performance on the robot is concluded to be down to a combination of insufficient number of possible actions, and capabilities of the robot itself.
+
 \end{abstract}
 
 \begin{keywords}
-Put a few keywords here.
+Machine learning, Robotics, Reinforcement Learning, Neural Networks, Simulation, Experience Replay, Nao
 \end{keywords}
 
 \section{Introduction}
@@ -69,14 +83,47 @@ The task chosen for the robot to learn to perform was to balance a ball on a tra
 This task was chosen because it seemed simple enough to be achievable by a robot with the chosen learning techniques. The number of states is fairly small, but big enough that it is hard to outright describe what to do in every scenario. It is also complex enough to be difficult to describe without mathematically modelling the whole system, but simple enough that the leant model can interpolate to unseen scenarios. The task is also one achievable by humans in a basic sense of just standing still, but becomes difficult when extra tasks are included such as walking forward. As such it is hoped that the robot could surpass human performance if it learns well enough. The task has obvious real world applications. Whilst the level of performance achieved in this project is insufficient to have much real world impact, a high level implementation of this behaviour could be used to carry object accross a room, perhaps to an immobile patient, or to carry a person out of a dangerous environment.
 
 \subsection{The Robot}
-The robot used is the humanoid Nao from SoftBank robotics. It is fully programmable using the Python API and allows for full control over the angles and position of joints. It has built in vision capabilities from the cameras located on its head. For the setup of this task, the Nao robot is standing with its arms stretched out. It grabs on to a cardboard tray and holds it flat in front of it. There is a small track that the ball sits in to prevent it from falling off the back or front of the tray, and two side buffers to prevent it from falling off the sides. The robot has built in functionality to track a red ball which is the method used in this project. At any time the position in 3D space of the ball can be calculated by the robot. The velocity can then be obtained by observing the change in position over a given time period. The tray is tilted by the robot moving it arms. To determine the range of possible angles the robot can move between, the robot's arms were positioned by hand and the angles of the upper body joints were recorded. They were then manipulated so that the same angle could be recreate but in the opposite direction. The robot can then interpolate any angle between the maximum and minimum by taking a proportion of the maximum tilt and minimum tilt and adding the angles together.
+The robot used is the humanoid Nao from SoftBank robotics, shown in figures \ref{nao1} and \ref{nao2}. It is programmable using the Python API which gives control over the angles and position of joints. It has built in vision capabilities from the cameras located on its head. For the setup of this task, the Nao robot is standing with its arms stretched out. It grabs on to a cardboard tray and holds it flat in front of it. There is a small track that the ball sits in to prevent it from falling off the back or front of the tray, and two side buffers to prevent it from falling off the sides. The robot has built in functionality to track a red ball which is the method used in this project. At any time the position in 3D space of the ball can be calculated by the robot. The velocity can then be obtained by observing the change in position over a given time period. The tray is tilted by the robot moving it arms. To determine the range of possible angles the robot can move between, the robot's arms were positioned by hand and the angles of the upper body joints were recorded. They were then manipulated so that the same angle could be recreate but in the opposite direction. The robot can then interpolate any angle between the maximum and minimum by taking a proportion of the maximum tilt and minimum tilt and adding the angles together.
 
 The Nao was chosen over a purpose built robot, for example one that consisted of just the tray and a single poont of rotation. This is because the project was aimed to be as general as possible, as the methods used to learn behaviour for balancing will be more useful if the behaviour does not only works for a very specific instance. 
 
-INSERT PHOTO OF ROBOT AND TRAY
+%\begin{figure}[H]
+%	\centering
+%	\includegraphics[width=10cm]{no_ball_front}
+%	\caption{The Nao robot holding the tray in the horizontal position. There are two handles attached that it grabs onto with its hands.}
+%	\label{nao1}
+%\end{figure}
+%\begin{figure}[H]
+%	\centering
+%	\includegraphics[width=10cm]{with_ball}
+%	\caption{The Nao robot holding the tray with a ball. The head of the robot contains the camera moves as the ball moves.}
+%	\label{nao2}
+%\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{minipage}[t]{.45\textwidth}
+  \centering
+  \includegraphics[width=1\linewidth]{no_ball_front}
+  \caption{The Nao robot holding the tray in the horizontal position. There are two handles attached that it grabs onto with its hands.}
+  \label{nao1}
+\end{minipage}\quad
+\begin{minipage}[t]{.45\textwidth}
+  \centering
+  \includegraphics[width=1\linewidth]{with_ball}
+  \caption{The Nao robot holding the tray with a ball. The head of the robot contains the camera moves as the ball moves.}
+  \label{nao2}
+\end{minipage}
+\end{figure}
 
 \subsection{Simulation}
-The simulated environment is two-dimensional and comprises of a ball that rests on a tray that can tilt. The tray has barriers at either end to stop the ball from rolling off the ends of the tray. The tray can be tilted up to a maximum angle in each direction. This simulation was built using the Pymunk physics engine. At each stage of the simulation the position and velocity of the ball can be directly read, as well as the angle of the tray.  
+The simulated environment is two-dimensional and comprises of a ball that rests on a tray that can tilt. The tray has barriers at either end to stop the ball from rolling off the ends of the tray. The tray can be tilted up to a maximum angle in each direction. This simulation was built using the Pymunk physics engine. At each stage of the simulation the position and velocity of the ball can be directly read, as well as the angle of the tray.  Figure \ref{sim} shows the setup of the simulation.
+\begin{figure}[H]
+	\centering
+	\includegraphics[width=10cm]{sim}
+	\caption{The setup of the simulation}
+	\label{sim}
+\end{figure}
 
 \subsection{Reinforcement Learning Approach}
 The agent (the robot/simulation) learns how to balance the ball by trying different actions whilst aiming to get the ball into a good state. The method of reinforcement learning used in this project is Q-learning. Q-learning is a model-free reinforcement learning technique. Being model-free means there is no pre-learnt model that the actions are based off, it relies fully on the trial-and-error experiences for learning actions. Over time, the agent learns the best action to take for each state. This information is stored in a Q-matrix, a large matrix with a cell for each possible state the ball can be in. For each cell there is an array of length equal to the number of possible actions the agent can take. A value is stored for each action, with the value representing how good of an action it is given the current state. Learning starts with the agent observing the state it is in. It then looks at the Q-matrix and decides what the best action it can take is - the one with the greatest value. There is a probability that a different action will be taken instead - this allows for trialling different actions that may end up being more beneficial. It carries out the action and observes the state it ends up in. It also receives a reward dependent on how good this new state is. The value for the action taken from the old state is then updated using the exising value, the reward, and the value of the best possible action to take given the new state. The intuition behind using the best value of the new state is that Q-learning assumes the agent is follwing an optimal policy - the best possible chain of transitions between states, taking the optimal action each time. This is of course not the case during training, but over time it should converge to this. The update policy can be formalised as:
@@ -132,7 +179,7 @@ The first step in the supervised learning approach was to generate the training 
 %A neural network is a way to theoretically simulate any function, by combining many simple, linearly-separable functions known as neurons. The neurons e
 %exist in layers with one input layer and one output layer. Between the layers exists weights from each neuron to each neuron in the next layer. The network is trained by passing through the input data. Each neuron receives some input from the previous layer, maps the combination of input values to an output value depending on its function, then outputs a value that goes to the next layer. Once the input data has passed through the network, the output from the network is compared with the actual output from the training data. The difference is calculated and that error is used to refine the weights between the neurons. As more data is passed through, the network gets refined and begins to learn which inputs lead to which outputs.
 
-For this project, then input value is the state of position segment, velocity segment and angle segment. The output is one of the three possible actions - tilt left, tilt right, or don't tilt, encoded with one-hot encoding. 
+For this project, then input value is the state of position segment, velocity segment and angle segment. The output is one of the two possible actions - tilt left or tilt right, encoded with one-hot encoding. Only two actions were chosen in order to keep the number of options to a minimum, as more options would increase training time for the Q-learning. Three options was considered, with the third action being to not move, but it was decided that this option would be nullified by keeping the ball balanced by tilting between two angles repeatedly.
 
 
 \subsection{From Simulation To Robot}
@@ -146,7 +193,7 @@ The change of angle function calls to the robot joints are non-blocking. This me
 \subsection{Refining Simulation}
 In the case of the reinforcement learning, the robot did not successfully emulate the simulation to the desired quality. The behaviour mainly consisted of the ball rolling to one end, the robot tilting the tray from the extreme of one angle to the other extreme, and the ball rolling to the other end. From observing this behaviour it was seen that there are only about 5 actions taken from the ball travelling from one end of the tray to the other. More actions were required to fully rotate the tray to a meaningful angle, and so the current state of the Q-matrix was not sufficient. In particular, if the robot took an action that was not optimal because the Q-matrix was insufficiently trained, then it could completely ruin the robots ball balancing ability. There are quite a few states where the difference in value for each action was minimal, since they were far from an optimal state and each action gave the same reward. The only disparity came from which action was taken most recently, as this will have had the most recent value update. The first refinement made was to add a delay between actions in the simulation. It was hoped that this would allow the agent to learn to deal with having a lower frequency of actions. The speed of the ball was also increased to imitate that the real ball moves faster.
 
-To help with the non-optimal action being chosen, a "Q-matrix consensus" was taken when choosing an action. This takes into account the best action for the current state, but also the best actions for the states with a velocity segment difference of one either side, and the states with a position segment different either side. Assuming the current state does not involve the maximum or minimum velocity or position, this gives five votes for what the best action to take is. The action with the highest number of votes is taken. In the result of a tie, the original action is taken. The intuition behind this is that the states considered are similar to the current state, so will most likely have similar optimal actions. So in the case that the current state's values have not converged in the Q-matrix, it is hoped that some of the others have, leading to a better estimation of what the optimal state is. MAYBE REMOVE THIS
+%To help with the non-optimal action being chosen, a "Q-matrix consensus" was taken when choosing an action. This takes into account the best action for the current state, but also the best actions for the states with a velocity segment difference of one either side, and the states with a position segment different either side. Assuming the current state does not involve the maximum or minimum velocity or position, this gives five votes for what the best action to take is. The action with the highest number of votes is taken. In the result of a tie, the original action is taken. The intuition behind this is that the states considered are similar to the current state, so will most likely have similar optimal actions. So in the case that the current state's values have not converged in the Q-matrix, it is hoped that some of the others have, leading to a better estimation of what the optimal state is. MAYBE REMOVE THIS
 
 After seeing how the simulated behaviour worked with the robot, the simulation was changed to reflect the robots mechanics more closely with the hope of learning to deal with the difficulties present in the robot. The two behaviours incorporated into the robot are the delay between actions, and the overall speed of the ball. The delay between actions helps model the speed of the robot updating of the tray angle, which is slower then the simulation. After the tray has moved, it waits a set number of frames before deciding on the new action to perform. The speed of the ball is reflected in the simulation by increasing the number of steps taken per frame of the simulation. 
 
@@ -157,7 +204,7 @@ Experience replay is when data acquired during the online-learning process are s
 
 This data was recorded by having the Nao hod the tray and carry out actions. It was told to do either random actions or follow a learnt behaviour in order to allow it to experience as many states as possible. For each possible state, a maximum of 20 actions and nex states were recorded. Multiple states wer recorded since the nex state could vary quite a lot. Not all states had 20 experiences recorded. In total, about 5900 experiences were recorded. Some states had no expereinces recoded, as they were never experienced when gathering the data. This is okay because they are unlikely to be experienced in actual balancing. 
 
-Unfortunately, once again the improvement was not significant, but perhaps marginally better. The most interesting observation was that the simulation, when ran after experience replay, mimicked the behaviour of the robot quite closely - the ball was rolled from end to end. This shows that the simulation was capable of learning the robot's behaviour, but not the other way around. MOVE TO RESULTS?
+%Unfortunately, once again the improvement was not significant, but perhaps marginally better. The most interesting observation was that the simulation, when ran after experience replay, mimicked the behaviour of the robot quite closely - the ball was rolled from end to end. This shows that the simulation was capable of learning the robot's behaviour, but not the other way around. MOVE TO RESULTS?
 
 \section{Results}
 The success of a learnt behaviour for this task cannot be fully quantified as there is no end state. Instead the performance over time can be observed and used as a way to assess how well the learnt behaviour performs. If after training the ball is moving from side to side then it is clearly not balanced well. If it stays in the middle, it has successfully been balanced. For each training run, the position at each step of the simulation was recorded. This information can be plotted on a graph showing the motion of the ball over time, and is the metric used here to assess performance of each method. 
@@ -187,12 +234,14 @@ Each of the following tests were ran for 50000 iterations, with an iteration con
 The parameters that concern the exploration rate are not independent, so all possible combinations of their values were tested. The quality of each parameter combination was judged by analysing the position of the ball over 5000 time frames once trained, and with explore rate set to 0. The best parameter combination was the one that gave the graph with the ball closest to 0 for the longest amount of time, and fewest movements to the edge of the tray. The best combination of parameters was found to be initial exploration rate = 0.5, exploration rate reduction frequency = 20, and exploration rate value = 1.5. An initial exploration rate of 0.5 makes sense, since at the start there is no optimal action for any state - each action has an initial value of 0, so the first action is chosen by default. Having an exploration rate of 0.5 means half the time that action will be taken, and the other half of the time the other action will be taken making it completely random. This is a good way to get a good starting sample of actions throughout the matrix. The combination of reduction value multiplier 1.5 and reduction frequency 20 has no direct explanation, it just seems to be the case that that speed and rate of phasing out the exploration rate works well. It allows for sufficient exploration whilst training but diminishes quick enough to not cause random actions when the best actions have already been found. Figure \ref{f1} shows the performance of the trained Q-matrix with these parameters over the 5000 time frames.
 
 \begin{figure}[H]
-	\includegraphics{100_small}
+	\centering
+	\includegraphics[width=10cm]{100_small}
 	\caption{The position of the ball over 5000 actions. Note that the width of the tray is 125 in each direction, so the ball stays very confortably in the centre}
 	\label{f1}
 \end{figure}
 \begin{figure}[H]
-	\includegraphics{101_small}
+	\centering
+	\includegraphics[width=10cm]{101_small}
 	\caption{An example of learnt behaviour that was not successful. The initial eploration rate was 0.2, reduction value was 1.5, number of reductions was 5. The repetition of the pattern shows that it has slightly learnt the ability to balance, however the amplitude is large. The ball also goes to the end quite frequently}
 	\label{f2}
 \end{figure}
@@ -204,7 +253,8 @@ For learn rate and discount factor, low values of both gave poor results, and fo
 
 Convergence speed is another important aspect to learning. In a small task like this training takes less than a minute. For a larger task however, it is important to reach the desired performance level as soon as possible. It is hard to know when the task is fully leant since there is no exact completion criteria. However, looking at the plot of position against time for the whole learning procedure can show when the ball is kept in a constant position. Figure \ref{f3} shows this for the agent learning over 50000 iterations with the refined parameters.
 \begin{figure}[H]
-	\includegraphics{153_small}
+	\centering
+	\includegraphics[width=10cm]{153_small}
 	\caption{The position of the ball over an entire training session. At the start the ball rapidly rolls between either side of the tray. Over time this becomes less frequent as behaviour to prevent this is learnt, and the random actions happen less frequently. By the end of the training, the ball is kept consistently in the middle of the tray.}
 	\label{f3}
 \end{figure}
@@ -229,7 +279,8 @@ Discount factor & 0.9 \\\hline
 
 \subsection{General Reward vs Specific Reward for Q-learning in Simulation}
 \begin{figure}[H]
-	\includegraphics{157}
+	\centering
+	\includegraphics[width=10cm]{157}
 	\caption{The position of the ball when training with a detailed reward function.}
 	\label{f5}
 \end{figure}
@@ -248,9 +299,9 @@ Hidden layers structure & (2), (5), (10), (2, 2), (5, 5), (10, 10)\\ \hline
 Number of training epochs & 50, 100, 150, 200\\ \hline
 \end{tabular}
 \end{table}
-
 \begin{figure}[H]
-	\includegraphics{86_nn}
+	\centering
+	\includegraphics[width=10cm]{86_nn}
 	\caption{The position of the ball in simulation or 2000 time steps for the trained neural network. The ball starts at the side and is moved closer to the center. It overshoots the centre at first but is moved back and stays in the middle for the remainder of the time.}
 	\label{nn_param_test}
 \end{figure}
@@ -292,7 +343,8 @@ The same parameter refinement as the original simulation was carried out in case
 The overall performance of the learnt model was worse with the delay and ball speed up. It did still perform to a level that could be considered balancing, and did not touch the end of the tray very often. Figure \ref{refined_sim_general} shows the behaviour after 50000 iterations. This decrease in performance is not unsurprising since the tray can make adjustments less frequently so has fewer chances to counteract the movement of the ball. The increased speed of the ball also means any movement the ball makes will cover more distance and it will hit the sides quicker.
 
 \begin{figure}[H]
-	\includegraphics{195}
+	\centering
+	\includegraphics[width=10cm]{195}
 	\caption{The position of the ball when training with the delay and increased ball speed. The ball rolls to the edges a few times over the 5000 time steps, but the tray gets it under control again. }
 	\label{refined_sim_general}
 \end{figure}
@@ -311,11 +363,11 @@ Simulated behaviour is simlar to nao.
 
 Show results of performance of just delayed simulation, just experience replay alone and then ER with trained Q mat.
 \subsection{Refined Q-learning with Robot}
-Figure \ref{delay_noer_1} shows the performance of the robot with behaviour learnt from the simulation with the added delay. As can be seen the performance was worse. The ball moved between the sides of the tray, and only occasionally did the directon change as the ball moved to the end. As this showed no improvement, experimentation with varying levels of delay was abandoned. MAYBE CHANGE THIS. IT SEEMS WEIRD THAT THE BEHAVIOUR IS WORSE, IT SHOULD PROBABLY BE THE SAME AS THE SAME BEHAVIOUR WILL AHVE BEEN LEARNT
+Figure \ref{delay_noer_1} shows the performance of the robot with behaviour learnt from the simulation with the added delay. The performance was not noticably better than the behaviour learnt without the delay. 
 \begin{figure}[H]
 	\centering
-    \subfloat[Instance 1]{{\includegraphics[width=8.5cm]{17_delay_noer} }}%
-    \subfloat[Instance 2]{{\includegraphics[width=8.5cm]{18_delay_noer} }}%
+    \subfloat[Instance 1]{{\includegraphics[width=8.5cm]{43_delay} }}%
+    \subfloat[Instance 2]{{\includegraphics[width=8.5cm]{44_delay} }}%
 	\caption{Two instances of the Nao balancing the ball using behaviour learnt from the simulation with a delay.}
 	\label{delay_noer_1}
 \end{figure}
@@ -325,7 +377,7 @@ The reinforcement learning did not improve the results either. As shown by figur
 	\centering
     \subfloat[Instance 1]{{\includegraphics[width=8.5cm]{36_er} }}%
     \subfloat[Instance 2]{{\includegraphics[width=8.5cm]{37_er} }}%
-	\caption{Two instances of the Nao balancing the ball using behaviour learnt from the Q-matrix trained on experiences, using a Q-matrix trained in simulation to get the future rewards in the update function.}
+	\caption{Two instances of the Nao balancing the ball using behaviour learnt from the Q-matrix trained using experience replay, using a Q-matrix trained in simulation to get the future rewards in the update function.}
 	\label{er_nao}
 \end{figure}
 
@@ -336,17 +388,72 @@ This technique is useful because it allows for interpolation between states, whi
 From the results, it is concluded that the supervised learning approach was better suited to the ball balancing task than the reinforcement learning approach. 
 
 \subsection{Failure of Refinement Process}
+Results show that the attempts to refine the Q-learning approach were unsuccessful.
+
+Adding delay to the simulation didn't improve the results, nor did it make them much worse. This is likely because the Q-matrix learnt in simulation will be the same as without the delay. This is because the fundamental behaviour is the same regardless of whether or not there is a delay. For each state, out of the two possible actions to take, ther is always an optimal one that will help to slow the ball down and keep it closer to the centre. The delay will not really affect which is the best action to take.
+
+The ineffectiveness of experience replay can be explained with an example shown in table \ref{er_example}. This shows the 18 experiences recorded for the state (8, 4, 6), the action taken, the resultant state, and the reward for being in that new state. Some new states are entered more than once, as shown by frequency. This state was chosen as it is a reasonaby common state with many outcomes with different rewards. This wide variety of outcomes is the main issue with the experience replay. Since ther e are so many outocmes, it shows that the robot is very inprecise with the actions it makes, and the ball can end up in a wide variety of places for the same action. This happens for a number of reasons. Firstly, because the values of speed and velocity have been mapped to discrete segments, it means that similar values have been grouped tegether. As such, two positions could be at the opposite ends of the segment, and as such would have quite different values. Secondly, the inaccuracy in the Nao's ball tracking measurements introduces variation in the measured stated. Lastly, the real world has so many possabilities of things that could happen, than it is not unreasonable that the ball behaves so differently each time. As a result of this variation, it was not uncommon for the same action to have outcomes with differing rewards. Table \ref{er_example} shows this is the case for both actions. As such, when training with this data, there is no clear best action so the behaviour will not converge. A few states occurred more frequenctly, such as (7, 3, 5), but not enough to be considered the expected outcome, so it is not sufficient to just take this experience as the sole outcome for action 0. 
+
+%       1{'action': 0, 'reward': 5, 'new_state': (7, 3, 5)},
+%       1{'action': 0, 'reward': 5, 'new_state': (7, 3, 5)},
+%       9{'action': 1, 'reward': 5, 'new_state': (7, 6, 7)},
+%       2{'action': 0, 'reward': -5, 'new_state': (6, 2, 5)},
+%       3{'action': 0, 'reward': 5, 'new_state': (6, 4, 5)},
+%       4{'action': 0, 'reward': 5, 'new_state': (5, 3, 5)},
+%       5{'action': 0, 'reward': 5, 'new_state': (8, 4, 5)},
+%       10{'action': 1, 'reward': 5, 'new_state': (7, 3, 7)},
+%       1{'action': 0, 'reward': 5, 'new_state': (7, 3, 5)},
+%       11{'action': 1, 'reward': 5, 'new_state': (7, 4, 7)},
+%       9{'action': 1, 'reward': 5, 'new_state': (7, 6, 7)},
+%       6{'action': 0, 'reward': -5, 'new_state': (7, 2, 5)},
+%       7{'action': 0, 'reward': -5, 'new_state': (7, 3, 7)},
+%       12{'action': 1, 'reward': -5, 'new_state': (6, 3, 5)},
+%       1{'action': 1, 'reward': -5, 'new_state': (7, 3, 5)},
+%       12{'action': 1, 'reward': -5, 'new_state': (6, 3, 5)},
+%       8{'action': 0, 'reward': -5, 'new_state': (6, 3, 7)},
+%       13{'action': 1, 'reward': -5, 'new_state': (8, 5, 7)}
+
+\begin{table}[htb]
+\centering
+\caption{Recorded experiences for the state (8, 4, 6). In this state, ball position is to the right, velocity is to the left, tray is tilted with the right side above the left. An action of 0 tilts the tray clockwise, an action of 1 tilts the tray anticlockwise.}
+\vspace*{6pt}
+\label{er_example}
+\begin{tabular}{P{0.12\linewidth}P{0.1\linewidth}P{0.12\linewidth}P{0.1\linewidth}P{0.1\linewidth}}\hline
+Experience & Action & New state & Reward & Fequency\\ \hline\hline
+1 & 0 & (7, 3, 5) & 1 & 4 \\ \hline
+2 & 0 & (6, 2, 5) & -1 & 1 \\ \hline
+3 & 0 & (6, 4, 5) & 1 & 1 \\ \hline
+4 & 0 & (5, 3, 5) & 1 & 1 \\ \hline
+5 & 0 & (8, 4, 5) & 1 & 1 \\ \hline
+6 & 0 & (7, 2, 5) & -1 & 1 \\ \hline
+7 & 0 & (7, 3, 7) & -1 & 1 \\ \hline
+8 & 0 & (6, 3, 7) & -1 & 1 \\ \hline
+9 & 1 & (7, 6, 7) & 1 & 2 \\ \hline
+10 & 1 & (7, 3, 7) & 1 & 1 \\ \hline
+11 & 1 & (7, 4, 7) & 1 & 1 \\ \hline
+12 & 1 & (6, 3, 5) & -1 & 2 \\ \hline
+13 & 1 & (8, 5, 7) & -1 & 1 \\ \hline
+\end{tabular}
+\end{table}
 
 \subsection{Differences Between Simulation and Robot}
+A factor that limited the overall performance of even the best methods was the capabilities of the robot. Results show that the better the performance in simulation, the better the performance on the robot. This is becaus eth efundamental behaviour of what to do when balancing the ball is the same - slow it down by tilting to oppose the motion such that it is at zero velocity in the middle. As such, the action to take in each state is most likely always the same regardless of the training method. Assuming then that optimal behaviour is learnt in simulation - a reasonable assumption considering the performance in the simulator, the inability to perform as well comes down to a combination of things. This things are though to be the capabilities of the robot, and a flaw in the possible actions taken by the robot. The capabilities of the robot certainly do affect the performance. Speed of moving the tray and the ball tracking abiliy are two of the most important. However, as mentioned earlier in the paper, the robot was chosen because it was not a perfect environmet and part of the task was to evaluate the difficulties with moving from a perfect environment of the simulation to a more dynamic environemt of the robot. This makes the possible actions taken by the robot the most limiting factor in the success of this project. As previously mentioned, the choice of two actions for the agent to take means there is always a superior choice, and that choice does not change with the situation such as a delay being introduce. An improvement could be to introduce more possible actions that the agent can take. One option coild be to move two or three angle segments as an action, in addition to the option of one. This would give the agent a chance to make more drastic actions in the cases of the ball near the end or at high speed, and smaller actions when the ball only needs to be moved a small amount. The most important improvement though would be in a situation when the environment is different, such as an added delay like with the robot. If the agent can tilt the tray by a large amount, then the delay is nullified as it would be equivalent to taking two or three normal actions if there were no delay. Another option could be to rotate the tray by an angle proportional to the speed and position of the ball. This would be difficult with Q-learning as a discrete number of actions would be needed and too many would massively increase the state, action space. It could be a good alternative for supervised learning however, with the output of the network indicating how much to rotate the tray by. 
 
-The issue with q-learning for this instance, and why QNN would not work. In it's current implementation, there are only two possible rewards. This is to avoid over-engineering by keeping the reward function as simple as possible. This could however be the root of the issue with underperformance of any behaviour learnt directly from the robot. Due to the nature of the task, any action of turning the tray can make the ball end up in only one of a few states. These states will be similar to the state before the action was taken. This means that the new state is likely receive the same reward as the previous state. It also means that if the other action was taken, the new state would also be similar and hence would also likely reeive the same reward. As such, it is often the case that when making a decision, regardless of the action taken the reward will be the same. The cases where the two actions are likely to give different rewards, that is, on the boundaries of the good states and bad states, are the most important states for crafting behaviour. These "critical states" are ones that show that obe action is clearly better than the other, and so the Q-values diverge with the good action's value growing positively and the bad action's value getting lower. As learning continues, each q-value update is influenced by the best action from the next state. As mentioned earlier, there is often not a best state since both actions give the same reward. In the cases where the next state is a critical state, however, the difference in the quality of actions does affect the learnt behaviour such that it will be similar to the bahaviour in that critical state. This behaviour then propagates through the rest of the matrix as learning continues. This is clearly a slow process as there are so few critical states due to the binary reward system. This explains why any attempt to learn directly on the robot would be futile as it would take far too long. It also explains why the learning time for the specific reward was faster than for the general reward, since there are more critical states with the specific reward.
 
-Explain how having more actions would have been better as it gives more of a chance to compensate for drastic actions. 
+\subsection{Learning Directly on the Robot}
+Learning from the actions the robot makes would likely not work because in the current implementation of the task there are only two possible rewards. This is to avoid over-engineering by keeping the reward function as simple as possible. This could however be the root of the issue with underperformance of any behaviour learnt directly from the robot. Due to the nature of the task, any action of turning the tray can make the ball end up in only one of a few states. These states will be similar to the state before the action was taken. This means that the new state is likely to receive the same reward as the previous state. It also means that if the other action was taken, the new state would also be similar and hence would also likely receive the same reward. As such, it is often the case that when making a decision, regardless of the action taken the reward will be the same. The cases where the two actions are likely to give different rewards, that is, on the boundaries of the good states and bad states, are the most important states for crafting behaviour. These "critical states" are ones that show that one action is clearly better than the other, and so the Q-values diverge with the good action's value growing positively and the bad action's value getting lower. As learning continues, each q-value update is influenced by the best action from the next state. As mentioned earlier, there is often not a best state since both actions give the same reward. In the cases where the next state is a critical state, however, the difference in the quality of actions does affect the learnt behaviour such that it will be similar to the bahaviour in that critical state. This behaviour then propagates through the rest of the matrix as learning continues. This is clearly a slow process as there are so few critical states due to the binary reward system. This explains why any attempt to learn directly on the robot would be futile as it would take far too long. It also explains why the learning time for the specific reward was faster than for the general reward, since there are more critical states with the specific reward.
 
-Say would have been rpferred if the angles that the tray could move between were not restricted. This is because an obvioud application would be navigating uneven terrain, and if there is a bit of really uneven terain that tilts such that the tray cannot get the tray to be at least horizintal, then there is no hope of balancing. 
+One method that was not explored despite seeming a viable option was using a neural network as a function approximator, also known as a Q-Neural Network. It should work well as it can learn behaviour with no prior knowlege - an advantage of Q-learning, and can interpolate values, avoiding unconverged values - an advantage with supervised learning. However, there is also reason as to why it would likely work no better than the methods already implemented. As results show, even optimal simulated behaviour doe not work that well on the robot. This means the only other alternative is to learn directly on the robot which is not very viable.
 
 \section{Conclusion}
 
+This project has evlauated the ability of different machine learning techniques to tackle a ball balancing task. The task took place in simulation and on a robot balancing a ball on a tray. The machine learning techniques studied were Q-learning and a neural network. 
+
+Initial results show that both methods worked well in simulation and were able to keep the ball balanced indefinitely once trained. When this behaviour was ported to the robot, the general balancing behaviour was present but the ball could not be balanced as well as in the simulator. Results showed that out of the two, the neural network performed better. Results also showed that a more general and vague reward scheme that considered only the new state was better than a more engineered scheem that took into account the previous and new state. This is good as a gneeral scheme is preferred because it is less restrictive in what the agent can learn as an overly specific reward fucntion could ignore some forgotten scenarios.
+
+Attemps were made to improve the Q-learning approach, however the attempts were not successful. The inability to improve was concluded to be down to the fundamental design of the Q-learning architecture not having enough actions, and that they binary reward scheme was too limiting to allow for learning out of simulation. Even for the neural network, the inability of the robot to keep the ball balanced was mainly down to the capabilities of the robot as near perfect balancing was acheived in simulation. 
+
+Extensions tp the project could look into a larger state-action space with more actions and how the Nao robot performs with that. The project could be repeated with a different robot. If this proves successful, the problem could be expanded to study a balancing system where the angles are not limited. This is because currently there is a maximu and minimum angle that the tray can turn to. This limits the overall effecitveness of the solution. Even if full balancing worked on a machine, in an application such as nagivating uneven terrain having a limited range of angles could mean the tray is unable to be horizintal. 
 
 \bibliography{projectpaper}
 
@@ -388,3 +495,6 @@ To do:
 
 TO add:
 - Chage so says that it is not the number of decisions that happen at a low frequency i.e. like 5 as the ball moves, but is the number of actions that the nao actually makes. This came about as i noticed that the numebr of iterations on the graph did not correlate to the amount the ball moved i.e. it looks like the ball takes about 50 iterations to move from the middle to the edge, but you have said i takes only 5 actions. 
+- Do evaluation, conclusion and abstract
+- Go through it all and check, make consise, make consistent
+- Maybe redo the test for delay
